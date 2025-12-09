@@ -16,4 +16,7 @@ tiktoken==0.11.0
 thefuzz==0.22.1
 torch
 transformers>=4.44.2
+numpy>=1.26.4
+scipy>=1.15.3
+falkordb
 xmltodict==1.0.2
