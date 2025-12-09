@@ -10,6 +10,8 @@ from graphrag_toolkit.lexical_graph.indexing.model import TopicCollection, Topic
 
 logger = logging.getLogger(__name__)
 
+ARTICLES = ['a ', 'an ', 'the ']
+
 def format_text(text):
         if isinstance(text, list):
             return '\n'.join(s for s in text)
@@ -20,7 +22,7 @@ def format_list(values:List[str]):
     return '\n'.join(values)
 
 def clean(s):
-    return remove_parenthetical_content(format_value(s))
+    return remove_articles(remove_parenthetical_content(format_value(s)))
     
 def format_value(s):
     return s.replace('_', ' ') if s else ''
@@ -33,6 +35,14 @@ def strip_full_stop(s):
     
 def remove_parenthetical_content(s):
     return re.sub(r'\(.*\)', '', s).replace('  ', ' ').strip()
+
+def remove_articles(s:str):
+    s_lower = s.lower()
+    for article in ARTICLES:
+        if s_lower.startswith(article):
+            return s[len(article):]
+    return s
+
 
 def parse_extracted_topics(raw_text:str) -> Tuple[TopicCollection, List[str]]:
     
@@ -90,7 +100,7 @@ def parse_extracted_topics(raw_text:str) -> Tuple[TopicCollection, List[str]]:
             current_state = 'entity-extraction'
             continue
 
-        elif line.startswith('entity-') and line.endswith('relationships:'):    
+        elif line.startswith('entity-') and line.endswith('s:'):    
             current_state = 'relationship-extraction'
             continue
 

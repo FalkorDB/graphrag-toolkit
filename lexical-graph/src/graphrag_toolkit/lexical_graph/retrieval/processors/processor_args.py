@@ -60,10 +60,11 @@ class ProcessorArgs():
         self.derive_subqueries = kwargs.get('derive_subqueries', False)
         self.debug_results = kwargs.get('debug_results', [])
         self.reranker = kwargs.get('reranker', 'tfidf')
-        self.max_statements = kwargs.get('max_statements', 100)
+        self.disaggregate_results = kwargs.get('disaggregate_results', False)
+        self.max_statements = kwargs.get('max_statements', 200)
         self.max_search_results = kwargs.get('max_search_results', 5)
         self.max_statements_per_topic = kwargs.get('max_statements_per_topic', 10)
-        self.max_keywords = kwargs.get('max_keywords', 10)
+        self.max_keywords = kwargs.get('max_keywords', 3)
         self.max_subqueries = kwargs.get('max_subqueries', 2) 
         self.intermediate_limit = kwargs.get('intermediate_limit', 50)
         self.query_limit = kwargs.get('query_limit', 10)  
@@ -73,18 +74,21 @@ class ProcessorArgs():
         self.num_workers = kwargs.get('num_workers', 10)
         self.reranking_source_metadata_fn = kwargs.get('reranking_source_metadata_fn', None)
         self.source_formatter = kwargs.get('source_formatter', None)
-        self.statement_pruning_factor = kwargs.get('statement_pruning_factor', 0.1)
+        self.statement_pruning_factor = kwargs.get('statement_pruning_factor', 0.05)
         self.statement_pruning_threshold = kwargs.get('statement_pruning_threshold', None)
         self.enable_multipart_queries = kwargs.get('enable_multipart_queries', False)
-        self.ec_keyword_provider = kwargs.get('ec_keyword_provider', 'llm')
+        self.ec_keyword_provider = kwargs.get('ec_keyword_provider', 'vss') #llm
         self.ec_entity_provider = kwargs.get('ec_entity_provider', 'vss')
-        self.ec_num_entities = kwargs.get('ec_num_entities', 5)
-        self.ec_max_score_factor = kwargs.get('ec_max_score_factor', 3)
-        self.ec_min_score_factor = kwargs.get('ec_min_score_factor', 0.25)
-        self.ec_max_contexts = kwargs.get('ec_max_contexts', 2)
-        self.ec_max_depth = kwargs.get('ec_max_depth', 2)
+        self.ec_max_entities = kwargs.get('ec_max_entities', 5)
+        self.ec_max_score_factor = kwargs.get('ec_max_score_factor', 10)
+        self.ec_min_score_factor = kwargs.get('ec_min_score_factor', 0.1)
+        self.ec_max_contexts = kwargs.get('ec_max_contexts', 3)
+        self.ec_max_depth = kwargs.get('ec_max_depth', 3)
+        self.chunk_cosine_top_k = kwargs.get('chunk_cosine_top_k', 50)
+        self.chunk_beam_width = kwargs.get('chunk_beam_width', 10)
+        self.chunk_beam_max_depth = kwargs.get('chunk_beam_max_depth', 3)
+        self.no_cache = kwargs.get('no_cache', None)
         
-
 
     def to_dict(self, new_args:Dict[str, Any]={}):
         """

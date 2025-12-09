@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
+import os
 from typing import Dict, List, Optional, Protocol, Any
 
 from llama_index.core.readers.base import BaseReader
@@ -78,7 +79,11 @@ class JSONArrayReader(BaseReader):
             metadata from individual JSON objects. If None, metadata must come
             from extra_info or defaults to an empty dictionary.
     """
-    def __init__(self, ensure_ascii:bool=False, text_fn:Optional[TextExtractorFunction]=None, metadata_fn=Optional[MetadataExtractorFunction]):
+    def __init__(self, 
+                 ensure_ascii:bool=False, 
+                 text_fn:Optional[TextExtractorFunction]=None, 
+                 metadata_fn:Optional[MetadataExtractorFunction]=None,
+                 is_jsonl:Optional[bool]=False):
         """
         Initializes an instance of the class with options to configure ASCII handling,
         text extraction, and metadata extraction.
@@ -96,6 +101,7 @@ class JSONArrayReader(BaseReader):
         self.ensure_ascii = ensure_ascii
         self.text_fn = text_fn
         self.metadata_fn = metadata_fn
+        self.is_jsonl = is_jsonl
         
     def _get_metadata(self, data:Dict, extra_info:Dict):
         """
@@ -135,11 +141,25 @@ class JSONArrayReader(BaseReader):
         Returns:
             A list of `Document` objects, where each object contains text content and associated metadata.
         """
+
+        filename = os.path.basename(input_file)
+        if 'filename' not in extra_info:
+            extra_info['filename'] = filename
+
         with open(input_file, encoding='utf-8') as f:
-            json_data = json.load(f)
+
+            if self.is_jsonl:
+                json_data = []
             
-            if not isinstance(json_data, list):
-                json_data = [json_data]
+                s = f.readline()
+                while s:
+                    json_data.append(json.loads(s))
+                    s = f.readline()
+            else:
+                json_data = json.load(f)
+                
+                if not isinstance(json_data, list):
+                    json_data = [json_data]
 
             documents = []
 

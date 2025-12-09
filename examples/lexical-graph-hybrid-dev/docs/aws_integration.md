@@ -55,7 +55,7 @@ aws configure --profile your-profile
 
 Enable required models in the [Bedrock console](https://console.aws.amazon.com/bedrock/home#/modelaccess):
 
-- `anthropic.claude-3-5-sonnet-20240620-v1:0`
+- `anthropic.claude-3-7-sonnet-20250219-v1:0`
 - `cohere.embed-english-v3`
 
 ### 3. S3 Bucket Creation
@@ -92,7 +92,7 @@ S3_BUCKET_EXTRACK_BUILD_BATCH_NAME="your-graphrag-bucket"
 S3_BATCH_BUCKET_NAME="your-graphrag-bucket"
 
 # Bedrock Models
-EXTRACTION_MODEL="us.anthropic.claude-3-5-sonnet-20240620-v1:0"
+EXTRACTION_MODEL="us.anthropic.claude-3-7-sonnet-20250219-v1:0"
 EMBEDDINGS_MODEL="cohere.embed-english-v3"
 
 # Batch Processing (Optional)

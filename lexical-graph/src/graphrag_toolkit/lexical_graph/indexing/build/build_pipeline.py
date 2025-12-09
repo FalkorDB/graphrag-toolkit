@@ -4,6 +4,7 @@
 import logging
 import multiprocessing
 import math
+import time
 from typing import Any, List, Optional, Iterable
 from pipe import Pipe
 
@@ -63,13 +64,14 @@ class BuildPipeline():
                batch_size:Optional[int]=None, 
                batch_writes_enabled:Optional[bool]=None, 
                batch_write_size:Optional[int]=None, 
-               builders:Optional[List[NodeBuilder]]=[], 
+               builders:Optional[List[NodeBuilder]]=None, 
                show_progress=False, 
                checkpoint:Optional[Checkpoint]=None,
                build_filters:Optional[BuildFilters]=None,
                source_metadata_formatter:Optional[SourceMetadataFormatter]=None,
                include_domain_labels:Optional[bool]=None,
                include_local_entities:Optional[bool]=None,
+               include_classification_in_entity_id:Optional[bool]=None,
                tenant_id:Optional[TenantId]=None,
                **kwargs:Any
             ):
@@ -126,6 +128,7 @@ class BuildPipeline():
                 source_metadata_formatter=source_metadata_formatter,
                 include_domain_labels=include_domain_labels,
                 include_local_entities=include_local_entities,
+                include_classification_in_entity_id=include_classification_in_entity_id,
                 tenant_id=tenant_id,
                 **kwargs
             ).build
@@ -137,13 +140,14 @@ class BuildPipeline():
                  batch_size:Optional[int]=None, 
                  batch_writes_enabled:Optional[bool]=None, 
                  batch_write_size:Optional[int]=None, 
-                 builders:Optional[List[NodeBuilder]]=[], 
+                 builders:Optional[List[NodeBuilder]]=None, 
                  show_progress=False, 
                  checkpoint:Optional[Checkpoint]=None,
                  build_filters:Optional[BuildFilters]=None,
                  source_metadata_formatter:Optional[SourceMetadataFormatter]=None,
                  include_domain_labels:Optional[bool]=None,
                  include_local_entities:Optional[bool]=None,
+                 include_classification_in_entity_id:Optional[bool]=None,
                  tenant_id:Optional[TenantId]=None,
                  **kwargs:Any
             ):
@@ -190,6 +194,7 @@ class BuildPipeline():
         batch_write_size = batch_write_size or GraphRAGConfig.build_batch_write_size
         include_domain_labels = include_domain_labels or GraphRAGConfig.include_domain_labels
         include_local_entities = include_local_entities or GraphRAGConfig.include_local_entities
+        include_classification_in_entity_id = include_classification_in_entity_id or GraphRAGConfig.include_classification_in_entity_id
         source_metadata_formatter = source_metadata_formatter or DefaultSourceMetadataFormatter()
         
         for c in components:
@@ -222,12 +227,15 @@ class BuildPipeline():
             builders=builders, 
             build_filters=build_filters, 
             source_metadata_formatter=source_metadata_formatter, 
-            id_generator=IdGenerator(tenant_id=tenant_id)
+            id_generator=IdGenerator(
+                tenant_id=tenant_id, 
+                include_classification_in_entity_id=include_classification_in_entity_id
+            )
         )
-        self.node_filter = NodeFilter() if not checkpoint else checkpoint.add_filter(NodeFilter())
+        self.node_filter = NodeFilter() if not checkpoint else checkpoint.add_filter(NodeFilter(), tenant_id)
         self.pipeline_kwargs = kwargs
     
-    def _to_node_batches(self, source_doc_batches:Iterable[Iterable[SourceDocument]]) -> List[List[BaseNode]]:
+    def _to_node_batches(self, source_doc_batches:Iterable[Iterable[SourceDocument]], build_timestamp:int) -> List[List[BaseNode]]:
         """
         Converts batches of source documents into batches of nodes based on filtering and
         builder processes. Each batch of source documents is processed individually to form
@@ -243,7 +251,7 @@ class BuildPipeline():
             documents.
         """
         results = []
-    
+
         for source_documents in source_doc_batches:
         
             chunk_node_batches = [
@@ -252,7 +260,7 @@ class BuildPipeline():
             ]
 
             node_batches = [
-                self.node_builders(chunk_nodes) 
+                self.node_builders(chunk_nodes, build_timestamp=build_timestamp) 
                 for chunk_nodes in chunk_node_batches if chunk_nodes
             ]
 
@@ -285,10 +293,12 @@ class BuildPipeline():
 
         for source_documents in iter_batch(input_source_documents, self.batch_size):
 
+            build_timestamp = int(time.time() * 1000)
+
             num_source_docs_per_batch = math.ceil(len(source_documents)/self.num_workers)
             source_doc_batches = iter_batch(source_documents, num_source_docs_per_batch)
             
-            node_batches:List[List[BaseNode]] = self._to_node_batches(source_doc_batches)
+            node_batches:List[List[BaseNode]] = self._to_node_batches(source_doc_batches, build_timestamp)
 
             logger.info(f'Running build pipeline [batch_size: {self.batch_size}, num_workers: {self.num_workers}, job_sizes: {[len(b) for b in node_batches]}, batch_writes_enabled: {self.batch_writes_enabled}, batch_write_size: {self.batch_write_size}]')
 
@@ -301,6 +311,7 @@ class BuildPipeline():
                 batch_write_size=self.batch_write_size,
                 include_domain_labels=self.include_domain_labels,
                 include_local_entities=self.include_local_entities,
+                versioning_timestamp=build_timestamp,
                 **self.pipeline_kwargs
             )
 

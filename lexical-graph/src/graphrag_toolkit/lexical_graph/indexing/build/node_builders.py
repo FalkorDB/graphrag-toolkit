@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-from typing import List, Any, Optional, Callable, Dict
+from typing import List, Any, Optional
 from graphrag_toolkit.lexical_graph.metadata import SourceMetadataFormatter, DefaultSourceMetadataFormatter
+from graphrag_toolkit.lexical_graph.versioning import VERSIONING_METADATA_KEYS
 from graphrag_toolkit.lexical_graph.indexing import IdGenerator
 from graphrag_toolkit.lexical_graph.indexing.build.build_filters import BuildFilters
 from graphrag_toolkit.lexical_graph.indexing.build.node_builder import NodeBuilder
@@ -40,10 +41,10 @@ class NodeBuilders():
 
     def __init__(
             self, 
-            builders:List[NodeBuilder]=[], 
-            build_filters:BuildFilters=None, 
+            builders:Optional[List[NodeBuilder]]=None, 
+            build_filters:Optional[BuildFilters]=None, 
             source_metadata_formatter:Optional[SourceMetadataFormatter]=None,
-            id_generator:IdGenerator=None
+            id_generator:Optional[IdGenerator]=None
         ):
         
         """
@@ -75,7 +76,7 @@ class NodeBuilders():
 
         self.build_filters = build_filters
         self.id_generator = id_generator
-        self.builders = builders or self.default_builders(id_generator, build_filters, source_metadata_formatter)
+        self.builders = builders if builders is not None else self.default_builders(id_generator, build_filters, source_metadata_formatter)
 
         logger.debug(f'Node builders: {[type(b).__name__ for b in self.builders]}')
     
@@ -125,23 +126,34 @@ class NodeBuilders():
         Raises:
             Exception: If an error occurs during the node-building process by any builder.
         """
+
+        if len(self.builders) == 0:
+            return input_nodes
+        
+        def clean_relationship_metadata(node):
+            def remove_versioning_metadata(n):
+                for k in VERSIONING_METADATA_KEYS:
+                    if k in n.metadata:
+                        del n.metadata[k]
+            for _, node_info in node.relationships.items():
+                if isinstance(node_info, list):
+                    for n in node_info:
+                        remove_versioning_metadata(n) 
+                else:
+                    remove_versioning_metadata(node_info)
+                    
+            return node
         
         def apply_tenant_rewrites(node):
             
             node.id_ =  self.id_generator.rewrite_id_for_tenant(node.id_)
 
-            node_relationships = {}
-
-            for rel, node_info in node.relationships.items():
+            for _, node_info in node.relationships.items():
                 if isinstance(node_info, list):
-                    node_info_list = []
                     for n in node_info:
-                        n.node_id = self.id_generator.rewrite_id_for_tenant(n.node_id) 
-                        node_info_list.append(n)
-                    node_relationships[rel] = node_info_list
+                        n.node_id = self.id_generator.rewrite_id_for_tenant(n.node_id)    
                 else:
                     node_info.node_id = self.id_generator.rewrite_id_for_tenant(node_info.node_id)
-                    node_relationships[rel] = node_info
            
             return node
         
@@ -152,6 +164,7 @@ class NodeBuilders():
         def pre_process(node):
             node = clean_text(node)
             node = apply_tenant_rewrites(node)
+            node = clean_relationship_metadata(node)
             return node
 
         results = []
@@ -176,7 +189,7 @@ class NodeBuilders():
                     if any(key in builder.metadata_keys() for key in node.metadata)
                 ]
                 
-                results.extend(builder.build_nodes(builder_specific_nodes))
+                results.extend(builder.build_nodes(builder_specific_nodes, **kwargs))
             except Exception as e:
                     logger.exception('An error occurred while building nodes from chunks')
                     raise e

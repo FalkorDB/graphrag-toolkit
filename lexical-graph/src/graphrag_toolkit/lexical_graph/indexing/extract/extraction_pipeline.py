@@ -2,12 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import multiprocessing
+import time
 from pipe import Pipe
-from typing import List, Optional, Sequence, Dict, Iterable, Any
+from typing import List, Optional, Sequence, Generator, Iterable, Any
 
 from graphrag_toolkit.lexical_graph import TenantId
 from graphrag_toolkit.lexical_graph.config import GraphRAGConfig
 from graphrag_toolkit.lexical_graph.metadata import FilterConfig
+from graphrag_toolkit.lexical_graph.versioning import EXTRACT_TIMESTAMP
 from graphrag_toolkit.lexical_graph.indexing import IdGenerator
 from graphrag_toolkit.lexical_graph.indexing.utils.pipeline_utils import run_pipeline, node_batcher
 from graphrag_toolkit.lexical_graph.indexing.model import SourceType, SourceDocument, source_documents_from_source_types
@@ -17,7 +20,7 @@ from graphrag_toolkit.lexical_graph.indexing.build.checkpoint import Checkpoint
 from graphrag_toolkit.lexical_graph.indexing.extract.docs_to_nodes import DocsToNodes
 from graphrag_toolkit.lexical_graph.indexing.extract.id_rewriter import IdRewriter
 
-from llama_index.core.node_parser import TextSplitter
+from llama_index.core.node_parser import NodeParser
 from llama_index.core.utils import iter_batch
 from llama_index.core.ingestion import IngestionPipeline
 from llama_index.core.extractors.interface import BaseExtractor
@@ -115,6 +118,7 @@ class ExtractionPipeline():
                checkpoint:Optional[Checkpoint]=None,
                tenant_id:Optional[TenantId]=None,
                extraction_filters:Optional[FilterConfig]=None,
+               include_classification_in_entity_id:Optional[bool]=None,
                **kwargs:Any):
         """
         Creates an instance of the extraction pipeline, configured with specified components,
@@ -162,6 +166,7 @@ class ExtractionPipeline():
                 checkpoint=checkpoint,
                 tenant_id=tenant_id,
                 extraction_filters=extraction_filters,
+                include_classification_in_entity_id=include_classification_in_entity_id,
                 **kwargs
             ).extract
         )
@@ -176,6 +181,7 @@ class ExtractionPipeline():
                  checkpoint:Optional[Checkpoint]=None,
                  tenant_id:Optional[TenantId]=None,
                  extraction_filters:Optional[FilterConfig]=None,
+                 include_classification_in_entity_id:Optional[bool]=None,
                  **kwargs:Any):
         """
         Initializes the extraction pipeline with provided components, configurations, and optional
@@ -225,10 +231,22 @@ class ExtractionPipeline():
         components = components or []
         num_workers = num_workers or GraphRAGConfig.extraction_num_workers
         batch_size = batch_size or GraphRAGConfig.extraction_batch_size
+        include_classification_in_entity_id = include_classification_in_entity_id or GraphRAGConfig.include_classification_in_entity_id
+        extract_timestamp = kwargs.pop('extract_timestamp', None)
+
+        if num_workers > multiprocessing.cpu_count():
+            num_workers = multiprocessing.cpu_count()
+            logger.debug(f'Setting num_workers to CPU count [num_workers: {num_workers}]')
 
         for c in components:
             if isinstance(c, BaseExtractor):
                 c.show_progress = show_progress
+
+        id_generator=IdGenerator(
+            tenant_id=tenant_id, 
+            include_classification_in_entity_id=include_classification_in_entity_id
+        )
+        
 
         def add_id_rewriter(c):
             """
@@ -259,9 +277,9 @@ class ExtractionPipeline():
                 **kwargs (Any): Additional parameters for further customization of the pipeline or its
                     methods.
             """
-            if isinstance(c, TextSplitter):
+            if isinstance(c, NodeParser):
                 logger.debug(f'Wrapping {type(c).__name__} with IdRewriter')
-                return IdRewriter(inner=c, id_generator=IdGenerator(tenant_id=tenant_id))
+                return IdRewriter(inner=c, id_generator=id_generator)
             else:
                 return c
             
@@ -269,24 +287,25 @@ class ExtractionPipeline():
         
         if not any([isinstance(c, IdRewriter) for c in components]):
             logger.debug(f'Adding DocToNodes to components')
-            components.insert(0, IdRewriter(inner=DocsToNodes(), id_generator=IdGenerator(tenant_id=tenant_id)))
+            components.insert(0, IdRewriter(inner=DocsToNodes(), id_generator=id_generator))
             
         if checkpoint:
-            components = [checkpoint.add_filter(c) for c in components]
+            components = [checkpoint.add_filter(c, tenant_id) for c in components]
 
         logger.debug(f'Extract pipeline components: {[type(c).__name__ for c in components]}')
 
-        self.ingestion_pipeline = IngestionPipeline(transformations=components)
+        self.ingestion_pipeline = IngestionPipeline(transformations=components, disable_cache=True)
         self.pre_processors = pre_processors or []
         self.extraction_decorator = extraction_decorator or PassThroughDecorator()
         self.num_workers = num_workers
         self.batch_size = batch_size
         self.show_progress = show_progress
-        self.id_rewriter = IdRewriter(id_generator=IdGenerator(tenant_id=tenant_id))
+        self.id_rewriter = IdRewriter(id_generator=id_generator)
         self.extraction_filters = extraction_filters or FilterConfig()
+        self.extract_timestamp = extract_timestamp
         self.pipeline_kwargs = kwargs
     
-    def _source_documents_from_base_nodes(self, nodes:Sequence[BaseNode]) -> List[SourceDocument]:
+    def _source_documents_from_base_nodes(self, nodes:Sequence[BaseNode]) -> Generator[SourceDocument, None, None]:
         """
         Converts a sequence of BaseNode objects into a list of SourceDocument objects
         organized by their source relationships.
@@ -303,16 +322,27 @@ class ExtractionPipeline():
             List[SourceDocument]: A list of SourceDocument objects, each containing nodes
                 grouped by their source relationship.
         """
-        results:Dict[str, SourceDocument] = {}
+        current_source_id = None
+        current_source_document = None
         
         for node in nodes:
             source_info = node.relationships[NodeRelationship.SOURCE]
             source_id = source_info.node_id
-            if source_id not in results:
-                results[source_id] = SourceDocument()
-            results[source_id].nodes.append(node)
-
-        return list(results.values())
+            
+            if not current_source_id:
+                current_source_document = SourceDocument()
+                current_source_id = source_id
+ 
+            if source_id != current_source_id:
+                if current_source_document:
+                    yield current_source_document
+                current_source_document = SourceDocument()
+                current_source_id = source_id
+                
+            current_source_document.nodes.append(node)
+            
+        if current_source_document:
+            yield current_source_document
     
     def extract(self, inputs: Iterable[SourceType]):
         """
@@ -373,8 +403,21 @@ class ExtractionPipeline():
                 num_workers=self.num_workers,
                 **self.pipeline_kwargs
             )
+
+            extract_timestamp = self.extract_timestamp or int(time.time() * 1000)
+
+            def add_timestamp(node):
+                if EXTRACT_TIMESTAMP in node.metadata:
+                    return node
+                node.metadata[EXTRACT_TIMESTAMP] = extract_timestamp
+                return node
+
+            timestamped_nodes = [
+                add_timestamp(node)
+                for node in output_nodes
+            ]
   
-            output_source_documents = self._source_documents_from_base_nodes(output_nodes)
+            output_source_documents = self._source_documents_from_base_nodes(timestamped_nodes)
             
             for source_document in output_source_documents:
                 yield self.extraction_decorator.handle_output_doc(source_document)

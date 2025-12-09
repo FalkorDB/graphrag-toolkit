@@ -3,11 +3,12 @@
 
 import logging
 import abc
-from typing import Callable, Any, Dict, List, Optional, Union
+from typing import Callable, Any, Dict, List, Optional, Union, overload
 from dateutil.parser import parse
 from datetime import datetime, date
 
 from graphrag_toolkit.lexical_graph import GraphRAGConfig
+from graphrag_toolkit.lexical_graph.versioning import VersioningConfig, VALID_FROM, VALID_TO, TIMESTAMP_LOWER_BOUND, TIMESTAMP_UPPER_BOUND
 
 from llama_index.core.vector_stores.types import FilterCondition, FilterOperator, MetadataFilter, MetadataFilters
 from llama_index.core.bridge.pydantic import BaseModel
@@ -16,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 MetadataFiltersType = Union[MetadataFilters, MetadataFilter, List[MetadataFilter]]
 
+def format_version_independent_id_fields(fields:List[str]) -> str:
+    return ';'.join(fields)
 
 def is_datetime_key(key):
     """Determines if the given key corresponds to a datetime metadata field.
@@ -211,6 +214,43 @@ class FilterConfig(BaseModel):
             source_metadata_dictionary_filter_fn=DictionaryFilter(source_filters) if source_filters else lambda x: True
         )
 
+    def with_versioning(self, versioning_config:VersioningConfig):
+
+        if not versioning_config.enabled:
+            return self
+        
+        if not versioning_config.at_timestamp or versioning_config.at_timestamp == TIMESTAMP_UPPER_BOUND:
+            version_filter = MetadataFilter(
+                key=VALID_TO,
+                value=TIMESTAMP_UPPER_BOUND,
+                operator=FilterOperator.EQ
+            )
+        else:
+            version_filter = MetadataFilters(
+                filters = [
+                    MetadataFilter(
+                        key=VALID_FROM,
+                        value=versioning_config.at_timestamp,
+                        operator=FilterOperator.LTE
+                    ),
+                    MetadataFilter(
+                        key=VALID_TO,
+                        value=versioning_config.at_timestamp,
+                        operator=FilterOperator.GT
+                    )
+                ],
+                condition = FilterCondition.AND
+            )
+
+        if not self.source_filters:
+            return FilterConfig(version_filter)
+        else:
+            versionioned_filters = MetadataFilters(
+                filters = [version_filter, self.source_filters],
+                condition = FilterCondition.AND
+            )
+            return FilterConfig(versionioned_filters)
+
     def filter_source_metadata_dictionary(self, d: Dict[str, Any]) -> bool:
         """
         Filters the given metadata dictionary using a filter function.
@@ -226,7 +266,8 @@ class FilterConfig(BaseModel):
             bool: True if the dictionary passes the filter; otherwise, False.
         """
         result = self.source_metadata_dictionary_filter_fn(d)
-        logger.debug(f'filter result: [{str(d)}: {result}]')
+        if not result:
+            logger.debug(f'filter result: [{str(d)}: {result}]')
         return result
 
 
@@ -396,3 +437,52 @@ class DictionaryFilter(BaseModel):
             otherwise, returns False.
         """
         return self._apply_metadata_filters_recursive(self.metadata_filters, metadata)
+    
+FilterType = Union[FilterConfig, List[Dict], Dict]
+
+@overload
+def to_metadata_filter(filter:FilterConfig) -> FilterConfig:
+    ...
+
+@overload
+def to_metadata_filter(filters:List[Dict]) -> FilterConfig:
+    ...
+
+@overload
+def to_metadata_filter(filter:Dict) -> FilterConfig:
+    ...
+
+def to_metadata_filter(filter:FilterType) -> FilterConfig:
+    
+    if isinstance(filter, FilterConfig):
+        return filter
+    
+    def to_metadata_filters(d):
+        if isinstance(d, dict):
+            return MetadataFilters(
+                filters = [
+                    MetadataFilter(
+                        key=k, 
+                        value=v, 
+                        operator=FilterOperator.EQ
+                    ) for k,v in d.items()
+                ]
+            )
+        else:
+            raise ValueError(f'Expected dictionary, but received {type(d).__name__}')
+    
+    if isinstance(filter, dict):
+        return FilterConfig(
+            source_filters = to_metadata_filters(filter)
+        )
+    
+    if isinstance(filter, list):
+        return FilterConfig(
+            source_filters = MetadataFilters(
+                filters = [
+                    to_metadata_filters(d)
+                    for d in filter
+                ],
+                condition = FilterCondition.OR
+            )
+        )

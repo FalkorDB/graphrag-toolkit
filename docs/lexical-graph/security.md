@@ -188,7 +188,7 @@ You can use an existing encryption policy or you can create a new one using the 
 
 To allow your application to invoke the Amazon Bedrock foundation models used by the graphrag-toolkit, attach the following example IAM policy to the AWS identity under which your application runs. Replace `<region>` with the name of the AWS Region in which Amazon Bedrock is located, and `<geography>` with the Region prefix that represents the geography covered by an inference profile (e.g. `us` for US-based AWS REgiosn such as `us-east-1` and `us-west-2`).
   
-This example IAN policy assumes that you are using the toolkit's default models: `us.anthropic.claude-3-5-sonnet-20240620-v1:0` and `cohere.embed-english-v3`. Before running your applictaion, you must [enable access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to these models. See [Supported Regions and models for inference profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html) for details on predefined inference profiles that you can use and the Regions and models that support application inference profiles.
+This example IAN policy assumes that you are using the toolkit's default models: `us.anthropic.claude-3-7-sonnet-20250219-v1:0` and `cohere.embed-english-v3`. Before running your applictaion, you must [enable access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to these models. See [Supported Regions and models for inference profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html) for details on predefined inference profiles that you can use and the Regions and models that support application inference profiles.
 
 ```
 {
@@ -201,8 +201,8 @@ This example IAN policy assumes that you are using the toolkit's default models:
                 "bedrock:InvokeModel"
             ],
             "Resource": [
-                "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-20240620-v1:0",
-                "arn:aws:bedrock:<region>::inference-profile/<geography>.anthropic.claude-3-5-sonnet-20240620-v1:0",
+                "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-7-sonnet-20250219-v1:0",
+                "arn:aws:bedrock:<region>::inference-profile/<geography>.anthropic.claude-3-7-sonnet-20250219-v1:0",
                 "arn:aws:bedrock:<region>::foundation-model/cohere.embed-english-v3"
             ]
         }

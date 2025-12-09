@@ -6,6 +6,9 @@ from typing import Any
 
 from graphrag_toolkit.lexical_graph.storage.graph import GraphStore
 from graphrag_toolkit.lexical_graph.indexing.build.graph_builder import GraphBuilder
+from graphrag_toolkit.lexical_graph.versioning import VALID_FROM, VALID_TO, VERSION_INDEPENDENT_ID_FIELDS
+from graphrag_toolkit.lexical_graph.versioning import EXTRACT_TIMESTAMP, BUILD_TIMESTAMP
+from graphrag_toolkit.lexical_graph.metadata import format_version_independent_id_fields
 
 from llama_index.core.schema import BaseNode
 
@@ -60,7 +63,9 @@ class SourceGraphBuilder(GraphBuilder):
             No explicit exceptions are raised, but error handling and logging are done for cases
             where 'sourceId' is missing in the node metadata.
         """
+        
         source_metadata = node.metadata.get('source', {})
+        versioning_metadata = source_metadata.get('versioning', None)
         source_id = source_metadata.get('sourceId', None)
 
         if source_id:
@@ -78,11 +83,24 @@ class SourceGraphBuilder(GraphBuilder):
             clean_metadata = {}
             metadata_assignments_fns = {}
 
-            for k, v in metadata.items():
-                key = k.replace(' ', '_')
-                value = str(v)
+            def accept_k_v(key, value):
                 clean_metadata[key] = value
                 metadata_assignments_fns[key] = graph_client.property_assigment_fn(key, value)
+
+            for k, v in metadata.items():
+                key = k.strip().replace(' ', '_')
+                value = v
+                accept_k_v(key, value)
+                clean_metadata[key] = value
+                metadata_assignments_fns[key] = graph_client.property_assigment_fn(key, value)
+
+            if versioning_metadata:
+                accept_k_v(EXTRACT_TIMESTAMP, versioning_metadata['extract_timestamp'])
+                accept_k_v(BUILD_TIMESTAMP, versioning_metadata['build_timestamp'])
+                accept_k_v(VALID_FROM, versioning_metadata['valid_from'])
+                accept_k_v(VALID_TO, versioning_metadata['valid_to'])
+                if 'id_fields' in versioning_metadata:
+                    accept_k_v(VERSION_INDEPENDENT_ID_FIELDS, format_version_independent_id_fields(versioning_metadata['id_fields']))
 
             def format_assigment(key):
                 assigment = f'params.{key}'
@@ -95,6 +113,27 @@ class SourceGraphBuilder(GraphBuilder):
             query = '\n'.join(statements)
             
             graph_client.execute_query_with_retry(query, self._to_params(clean_metadata))
+
+            # prev_source_ids = source_metadata.get('previous_versions', [])
+
+            # if prev_source_ids:
+
+            #     prev_versions_statements = [
+            #         '// insert prev version relations',
+            #         'UNWIND $params AS params',
+            #         'MATCH (source:`__Source__`), (prev:`__Source__`)',
+            #         f"WHERE {graph_client.node_id('source.sourceId')} = params.sourceId AND {graph_client.node_id('prev.sourceId')} IN params.prevSourceIds",
+            #         'MERGE (source)-[:`__PREVIOUS_VERSION__`]->(prev)'
+            #     ]
+
+            #     prev_versions_properties = {
+            #         'sourceId': source_id,
+            #         'prevSourceIds': prev_source_ids
+            #     }
+
+            #     prev_versions_query = '\n'.join(prev_versions_statements)
+
+            #    graph_client.execute_query_with_retry(prev_versions_query, self._to_params(prev_versions_properties))
 
         else:
             logger.warning(f'source_id missing from source node [node_id: {node.node_id}]')

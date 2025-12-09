@@ -16,8 +16,9 @@ You are a question answering agent. I will provide you with a set of search resu
   - Do NOT directly quote the search results in your answer.
   - If the question is a yes/no question, start with either 'Yes' or 'No'.
   - If the search results are empty, do not attempt to answer the question.
+  - Do not speculate: answer based only on the evidence of the search results.
 
-Based on the search results and additional context, answer the following question as concisely as possible:
+Based on the search results and additional context, answer the following question as {answer_mode} as possible:
 """
 
 
@@ -59,15 +60,15 @@ Do not add any other explanatory text. Do not exceed {max_keywords} keywords.
 
 
 SIMPLE_EXTRACT_KEYWORDS_PROMPT = """
-You are an expert AI assistant specialising in keyword extraction. Your task is to identify the most relevant keywords from a text supplied by the user, up to {max_keywords} in total. Preserve proper names, noun phrases and titles as-is, including determiners such as 'The'. Return keywords in the order of significance, most significant first.
+You are an expert AI assistant specialising in named entity extraction. Your task is to identify the most relevant named entities from a text supplied by the user, up to {max_keywords} in total. Preserve proper names, noun phrases and titles as-is, including determiners such as 'The'. Return entities in the order of significance, most significant first.
 
 ## Response Format:
 
-Provide all keywords separated by '^' symbols.
+Provide all entities separated by '^' symbols.
 Note, result should be in one-line, separated by '^' symbols.
-Return keywords in the order of significance, most significant first.
+Return entities in the order of significance, most significant first.
 
-Do not add any other explanatory text. Do not exceed {max_keywords} keywords.
+Do not add any other explanatory text. Do not exceed {max_keywords} entities.
 
 <text>
 {text}

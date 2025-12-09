@@ -115,7 +115,7 @@ class FileSystemTap(PipelineDecorator):
         chunks_dir = join(output_dir, 'extracted', subdirectory_name, 'chunks')
         sources_dir = join(output_dir, 'extracted', subdirectory_name, 'sources')
 
-        logger.info(f'Preparing output directories [subdirectory_name: {subdirectory_name}, raw_sources_dir: {raw_sources_dir}, chunks_dir: {chunks_dir}, sources_dir: {sources_dir}, clean: {clean}]')
+        logger.debug(f'Preparing output directories [subdirectory_name: {subdirectory_name}, raw_sources_dir: {raw_sources_dir}, chunks_dir: {chunks_dir}, sources_dir: {sources_dir}, clean: {clean}]')
         
         if clean:
             if os.path.exists(raw_sources_dir):

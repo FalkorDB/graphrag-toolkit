@@ -19,6 +19,7 @@ from graphrag_toolkit.lexical_graph.indexing.build.fact_graph_builder import Fac
 from graphrag_toolkit.lexical_graph.indexing.build.entity_graph_builder import EntityGraphBuilder
 from graphrag_toolkit.lexical_graph.indexing.build.entity_relation_graph_builder import EntityRelationGraphBuilder
 from graphrag_toolkit.lexical_graph.indexing.build.graph_summary_builder import GraphSummaryBuilder
+from graphrag_toolkit.lexical_graph.indexing.build.local_entity_rewrites_graph_builder import LocalEntityRewritesGraphBuilder
 
 from llama_index.core.bridge.pydantic import Field
 from llama_index.core.schema import BaseNode
@@ -49,6 +50,7 @@ def default_builders() -> List[GraphBuilder]:
         EntityGraphBuilder(),
         EntityRelationGraphBuilder(),
         FactGraphBuilder(),
+        LocalEntityRewritesGraphBuilder(),
         GraphSummaryBuilder()
     ]
 

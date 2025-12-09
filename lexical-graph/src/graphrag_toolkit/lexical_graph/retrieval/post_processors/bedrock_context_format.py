@@ -51,7 +51,7 @@ class BedrockContextFormat(BaseNodePostprocessor):
             and optional details.
         """
         text = node.node.text
-        details = node.node.metadata['statement']['details']
+        details = node.node.metadata['statement'].get('details', None)
         if details:
             details = details.strip().replace('\n', ', ')
             return f"{text} (details: {details})"

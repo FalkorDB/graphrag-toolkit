@@ -3,6 +3,7 @@
 
 import time
 import logging
+from typing import Optional
 
 from graphrag_toolkit.lexical_graph import GraphRAGConfig
 from graphrag_toolkit.lexical_graph import to_tenant_id, TenantIdType, TenantId
@@ -15,7 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 GRAPH_SUMMARY_PROMPT = '''
-You are an expert AI assistant specialising in knowledge graphs. Based on the provided entities and property graph path descriptions, your task is to summarize the domain, scope and uses of a knowledge graph so that it can be utilized by a Model Context Protocol client. Include a list of up to 10 different questions the graph can be used to answer. Provide an authoritative response: do not use words such as 'appears to' or 'seems'. In your response describe the graph as a 'knowledge base', not a graph.
+You are an expert AI assistant specialising in knowledge graphs. Based on any supplied hints, togther with the provided entities and property graph path descriptions, your task is to summarize the domain, scope and uses of a knowledge graph so that it can be utilized by a Model Context Protocol client. Include a list of up to 10 different questions the graph can be used to answer. Provide an authoritative response: do not use words such as 'appears to' or 'seems'. In your response describe the graph as a 'knowledge base', not a graph.
+
+<hints>
+{hint}
+<hints>
 
 <entities>
 {entities}
@@ -28,7 +33,7 @@ You are an expert AI assistant specialising in knowledge graphs. Based on the pr
 ## Response format (separate each section with a new line)
 
 Domain: <Headline description of the domain>
-Scope: <The graph covers...>
+Scope: <The knowledge base covers...>
 Uses: <List valuable uses>
 Example questions: <10 example questions>
 '''
@@ -85,11 +90,12 @@ class GraphSummary():
         
         return results
         
-    def _generate_summary(self, entities:str, paths:str):
+    def _generate_summary(self, entities:str, paths:str, description:Optional[str]=None):
         return self.llm.predict(
             PromptTemplate(template=self.prompt_template),
             entities=entities,
-            paths=paths
+            paths=paths,
+            hint=description or ''
         )
     
     def _get_cached_summary(self, tenant_id:TenantId):
@@ -140,11 +146,11 @@ class GraphSummary():
 
         self.graph_store.execute_query_with_retry(cypher, parameters)
         
-    def create_graph_summary(self, tenant_id:TenantIdType=None):
+    def create_graph_summary(self, tenant_id:TenantIdType=None, description:Optional[str]=None, refresh:Optional[bool]=False):
 
         tenant_id = to_tenant_id(tenant_id)
 
-        if self.use_cached_entries:
+        if self.use_cached_entries and not refresh:
             summary = self._get_cached_summary(tenant_id)
             if summary is not None:
                 return summary
@@ -160,7 +166,7 @@ class GraphSummary():
         ])
 
         if entities and paths:
-            summary = self._generate_summary(entities, paths)
+            summary = self._generate_summary(entities, paths, description)
             self._cache_summary(tenant_id, summary)
             return summary
         else:

@@ -21,7 +21,7 @@ This example provides a hybrid development environment that combines local Docke
 Before starting, ensure you have:
 - AWS CLI configured with appropriate credentials
 - Access to Amazon Bedrock models:
-  - `anthropic.claude-3-5-sonnet-20240620-v1:0`
+  - `anthropic.claude-3-7-sonnet-20250219-v1:0`
   - `cohere.embed-english-v3`
 - S3 bucket for data storage
 - IAM roles for batch processing (optional)
@@ -137,7 +137,7 @@ S3_BUCKET_EXTRACK_BUILD_BATCH_NAME="your-bucket-name"
 S3_BATCH_BUCKET_NAME="your-bucket-name"
 
 # Bedrock Models
-EXTRACTION_MODEL="us.anthropic.claude-3-5-sonnet-20240620-v1:0"
+EXTRACTION_MODEL="us.anthropic.claude-3-7-sonnet-20250219-v1:0"
 EMBEDDINGS_MODEL="cohere.embed-english-v3"
 
 # Batch Processing

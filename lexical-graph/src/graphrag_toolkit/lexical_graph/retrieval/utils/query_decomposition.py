@@ -7,6 +7,7 @@ from typing import List
 from graphrag_toolkit.lexical_graph.config import GraphRAGConfig
 from graphrag_toolkit.lexical_graph.utils import LLMCache, LLMCacheType
 from graphrag_toolkit.lexical_graph.retrieval.prompts import EXTRACT_SUBQUERIES_PROMPT, IDENTIFY_MULTIPART_QUESTION_PROMPT
+from graphrag_toolkit.lexical_graph.retrieval.processors import ProcessorArgs
 
 from llama_index.core.prompts import PromptTemplate
 from llama_index.core.schema import QueryBundle
@@ -35,13 +36,14 @@ class QueryDecomposition():
             from a single query. Defaults to 2.
     """
     def __init__(self,
+                 args:ProcessorArgs,
                  llm:LLMCacheType=None, 
                  identify_multipart_question_template=IDENTIFY_MULTIPART_QUESTION_PROMPT,
                  extract_subqueries_template=EXTRACT_SUBQUERIES_PROMPT,
                  max_subqueries=2):
         self.llm = llm if llm and isinstance(llm, LLMCache) else LLMCache(
             llm=llm or GraphRAGConfig.response_llm,
-            enable_cache=GraphRAGConfig.enable_cache
+            enable_cache=GraphRAGConfig.enable_cache if not args.no_cache else not args.no_cache
         )
         self.identify_multipart_question_template = identify_multipart_question_template
         self.extract_subqueries_template = extract_subqueries_template

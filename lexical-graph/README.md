@@ -10,6 +10,8 @@ The lexical-graph package provides a framework for automating the construction o
   - Easily extended to support additional graph and vector stores and model backends.
   - [Multi-tenancy](../docs/lexical-graph/multi-tenancy.md) – multiple separate lexical graphs in the same underlying graph and vector stores.
   - Continuous ingest and [batch extraction](../docs/lexical-graph/batch-extraction.md) (using [Bedrock batch inference](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)) modes.
+  - [Versioned updates](../docs/lexical-graph/versioned-updates.md) for updating source documents and querying the state of the graph and vector stores at a
+point in time.
   - Quickstart [AWS CloudFormation templates](../examples/lexical-graph/cloudformation-templates/) for Neptune Database, OpenSearch Serverless, and Amazon Aurora Postgres.
 
 ## Installation
@@ -17,7 +19,7 @@ The lexical-graph package provides a framework for automating the construction o
 The lexical-graph requires Python and [pip](http://www.pip-installer.org/en/latest/) to install. You can install the lexical-graph using pip:
 
 ```
-$ pip install https://github.com/awslabs/graphrag-toolkit/archive/refs/tags/v3.12.0.zip#subdirectory=lexical-graph
+$ pip install https://github.com/awslabs/graphrag-toolkit/archive/refs/tags/v3.14.0.zip#subdirectory=lexical-graph
 ```
 
 If you're running on AWS, you must run your application in an AWS region containing the Amazon Bedrock foundation models used by the lexical graph (see the [configuration](../docs/lexical-graph/configuration.md#graphragconfig) section in the documentation for details on the default models used), and must [enable access](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html) to these models before running any part of the solution.
@@ -128,15 +130,16 @@ if __name__ == '__main__':
 ## Documentation
 
   - [Overview](../docs/lexical-graph/overview.md)
+  - [Graph Model](../docs/lexical-graph/graph-model.md)
   - [Storage Model](../docs/lexical-graph/storage-model.md) 
   - [Indexing](../docs/lexical-graph/indexing.md) 
     - [Batch Extraction](../docs/lexical-graph/batch-extraction.md) 
-  - [Querying](../docs/querying.md) 
-    - [Traversal-Based Search](../docs/traversal-based-search.md)
-    - [Configuring and Tuning Traversal-Based Search](../docs/configuring-and-tuning-traversal-based-search.md)
-  - [Multi-Tenancy](../docs/lexical-graph/multi-tenancy.md) 
-  - [Configuration](../docs/lexical-graph/configuration.md) 
-  - [Graph Model](../docs/lexical-graph/graph-model.md)
+    - [Configuring Batch Extraction](../docs/lexical-graph/configuring-batch-extraction.md)
+    - [Versioned Updates](../docs/lexical-graph/versioned-updates.md)
+  - [Querying](../docs/lexical-graph/querying.md) 
+    - [Traversal-Based Search](../docs/lexical-graph/traversal-based-search.md)
+    - [Traversal-Based Search Configuration](../docs/lexical-graph/traversal-based-search-configuration.md)
+  - [Configuration](../docs/lexical-graph/configuration.md)   
   - [Security](../docs/lexical-graph/security.md)
   - [FAQ](../docs/lexical-graph/faq.md)
 

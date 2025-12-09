@@ -3,6 +3,8 @@
 
 import logging
 import time
+import boto3
+import json
 from typing import List, Dict
 from dateutil.parser import parse
 
@@ -34,6 +36,8 @@ def default_reranking_source_metadata_fn(source:Source):
         str: A string containing the formatted metadata values, joined by commas.
     """
     def format_value(s):
+        if isinstance(s, int) or isinstance(s, float):
+            return str(s)
         try: 
             date = parse(s, fuzzy=False)
             return date.strftime("%B %-d, %Y")
@@ -42,6 +46,8 @@ def default_reranking_source_metadata_fn(source:Source):
                 return ''
             else:
                 return s
+        except TypeError:
+            return str(s)
     return ', '.join([format_value(v) for v in source.metadata.values()])
 
 class RerankStatements(ProcessorBase):
@@ -52,7 +58,6 @@ class RerankStatements(ProcessorBase):
         self.reranking_model = reranking_model or GraphRAGConfig.reranking_model
         super().__init__(args, filter_config)
         self.reranking_source_metadata_fn = self.args.reranking_source_metadata_fn or default_reranking_source_metadata_fn
-
 
     def _score_values_with_tfidf(self, values:List[str], query:QueryBundle, entity_contexts:EntityContexts):
         """
@@ -76,9 +81,9 @@ class RerankStatements(ProcessorBase):
         splitter = TokenTextSplitter(chunk_size=25, chunk_overlap=5)
 
         match_values = splitter.split_text(query.query_str.lower())
-        
-        extras = entity_contexts.context_strs
 
+        extras = entity_contexts.all_context_strs
+    
         match_values = [m for m in match_values if m not in extras] # order in entity context takes precedence
         num_primary_match_values = len(match_values) if not extras else len(match_values) + max(int(len(extras)/2), 1) # first entity contexts are important as match values
 
@@ -114,7 +119,7 @@ class RerankStatements(ProcessorBase):
         """
         logger.debug('Reranking with SentenceReranker')
 
-        extras = ', '.join(entity_contexts.context_strs)
+        extras = ', '.join(entity_contexts.all_context_strs)
 
         rank_query = (
             query 
@@ -135,6 +140,68 @@ class RerankStatements(ProcessorBase):
         return {
             reranked_value.text : reranked_value.score
             for reranked_value in reranked_values
+        }
+    
+    def _score_values_with_bedrock(self, values:List[str], query:QueryBundle, entity_contexts:EntityContexts) -> Dict[str, float]:
+        logger.debug('Reranking with Bedrock')
+
+        extras = ', '.join(entity_contexts.all_context_strs)
+
+        rank_query = (
+            query.query_str 
+            if not extras 
+            else f'{query.query_str} (keywords: {extras})'
+        )
+
+        region = boto3.Session().region_name
+
+        bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', region_name=region)
+        
+        modelId = GraphRAGConfig.bedrock_reranking_model
+        model_package_arn = f"arn:aws:bedrock:{region}::foundation-model/{modelId}"
+        
+        def rerank_text(text_query, text_sources, num_results, model_package_arn):
+            response = bedrock_agent_runtime.rerank(
+                queries=[
+                    {
+                        "type": "TEXT",
+                        "textQuery": {
+                            "text": text_query
+                        }
+                    }
+                ],
+                sources=text_sources,
+                rerankingConfiguration={
+                    "type": "BEDROCK_RERANKING_MODEL",
+                    "bedrockRerankingConfiguration": {
+                        "numberOfResults": num_results,
+                        "modelConfiguration": {
+                            "modelArn": model_package_arn,
+                        }
+                    }
+                }
+            )
+            return response['results']
+        
+        text_sources = []
+        for text in values:
+            text_sources.append({
+                "type": "INLINE",
+                "inlineDocumentSource": {
+                    "type": "TEXT",
+                    "textDocument": {
+                        "text": text,
+                    }
+                }
+            })
+            
+        num_results = min(self.args.max_statements or len(values), len(values))
+        
+        results = rerank_text(rank_query, text_sources, num_results, model_package_arn)
+                
+        return {
+            values[result['index']] : result['relevanceScore']
+            for result in results
         }
 
     def _process_results(self, search_results:SearchResultCollection, query:QueryBundle) -> SearchResultCollection:
@@ -174,10 +241,16 @@ class RerankStatements(ProcessorBase):
         start = time.time()
 
         scored_values = None
-        if self.args.reranker.lower() == 'model':
+        
+        reranker = self.args.reranker.lower()
+        if reranker == 'model':
             scored_values = self._score_values(values_to_score, query, search_results.entity_contexts)
-        else:
+        elif reranker == 'tfidf':
             scored_values = self._score_values_with_tfidf(values_to_score, query, search_results.entity_contexts)
+        elif reranker == 'bedrock':
+            scored_values = self._score_values_with_bedrock(values_to_score, query, search_results.entity_contexts)
+        else:
+            return search_results
 
         end = time.time()
 

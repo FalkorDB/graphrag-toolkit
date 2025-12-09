@@ -40,7 +40,7 @@ class KeywordProvider(KeywordProviderBase):
        
         self.llm = llm if llm and isinstance(llm, LLMCache) else LLMCache(
             llm=llm or GraphRAGConfig.response_llm,
-            enable_cache=GraphRAGConfig.enable_cache
+            enable_cache=GraphRAGConfig.enable_cache if not args.no_cache else not args.no_cache
         )
         self.simple_extract_keywords_template=simple_extract_keywords_template
         self.extended_extract_keywords_template=extended_extract_keywords_template

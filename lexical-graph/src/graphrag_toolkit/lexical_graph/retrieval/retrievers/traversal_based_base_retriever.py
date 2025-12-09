@@ -8,29 +8,29 @@ from typing import List, Any, Type, Optional
 from importlib.metadata import version, PackageNotFoundError
 
 from graphrag_toolkit.lexical_graph.metadata import FilterConfig
+from graphrag_toolkit.lexical_graph.versioning import VALID_FROM, VALID_TO, EXTRACT_TIMESTAMP, BUILD_TIMESTAMP, VERSION_INDEPENDENT_ID_FIELDS, TIMESTAMP_LOWER_BOUND, TIMESTAMP_UPPER_BOUND
 from graphrag_toolkit.lexical_graph.storage.graph import GraphStore
 from graphrag_toolkit.lexical_graph.storage.vector.vector_store import VectorStore
 from graphrag_toolkit.lexical_graph.retrieval.query_context import KeywordProvider, KeywordVSSProvider, KeywordNLPProvider, KeywordProviderMode, PassThruKeywordProvider
 from graphrag_toolkit.lexical_graph.retrieval.query_context import EntityProvider, EntityVSSProvider, EntityContextProvider
-from graphrag_toolkit.lexical_graph.retrieval.model import SearchResultCollection, SearchResult, ScoredEntity, EntityContexts
+from graphrag_toolkit.lexical_graph.retrieval.model import SearchResultCollection, SearchResult, EntityContexts
 from graphrag_toolkit.lexical_graph.retrieval.processors import *
 
 from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
-from llama_index.core.vector_stores.types import MetadataFilters
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_PROCESSORS = [
     DedupResults,
     DisaggregateResults, 
+    RemoveVersioningMetadata,
     FilterByMetadata,               
     PopulateStatementStrs,
     RerankStatements,
     PruneStatements,
     RescoreResults,
     SortResults,
-    TruncateResults,
     TruncateStatements,
     ClearChunks,
     ClearScores
@@ -40,7 +40,8 @@ DEFAULT_FORMATTING_PROCESSORS = [
     StatementsToStrings,
     SimplifySingleTopicResults,
     FormatSources,
-    ClearTopicIds
+    ClearTopicIds,
+    TruncateResults
 ]
 
 class TraversalBasedBaseRetriever(BaseRetriever):
@@ -137,7 +138,17 @@ class TraversalBasedBaseRetriever(BaseRetriever):
               -[:`__MENTIONED_IN__`]->(c)
               -[:`__EXTRACTED_FROM__`]->(s)
         WHERE {self.graph_store.node_id("l.statementId")} in $statementIds
-        WITH {{ sourceId: {self.graph_store.node_id("s.sourceId")}, metadata: s{{.*}}}} AS source,
+        WITH {{ 
+                sourceId: {self.graph_store.node_id("s.sourceId")}, 
+                metadata: properties(s), 
+                versioning: {{
+                    valid_from: coalesce(s.{VALID_FROM}, {TIMESTAMP_LOWER_BOUND}), 
+                    valid_to: coalesce(s.{VALID_TO}, {TIMESTAMP_UPPER_BOUND}),
+                    extract_timestamp: coalesce(s.{EXTRACT_TIMESTAMP}, {TIMESTAMP_LOWER_BOUND}),
+                    build_timestamp: coalesce(s.{BUILD_TIMESTAMP}, {TIMESTAMP_LOWER_BOUND}),
+                    id_fields: split(coalesce(s.{VERSION_INDEPENDENT_ID_FIELDS}, ""), ";")
+                }}  
+            }} AS source,
             t, l, c,
             {{ chunkId: {self.graph_store.node_id("c.chunkId")}, value: NULL }} AS cc, 
             {{ statementId: {self.graph_store.node_id("l.statementId")}, statement: l.value, facts: [], details: l.details, chunkId: {self.graph_store.node_id("c.chunkId")}, score: 0 }} as ll
@@ -187,15 +198,11 @@ class TraversalBasedBaseRetriever(BaseRetriever):
 
         return statements_results
     
-    def _init_entity_contexts(self, query_bundle: QueryBundle) -> List[str]:
+    def _init(self, query_bundle: QueryBundle) -> List[str]:
 
-        if not self.entity_contexts.contexts:
+        if not self.entity_contexts.keywords:
 
             start = time.time()
-
-            if not self.args.ec_max_contexts or self.args.ec_max_contexts < 1:
-                logger.debug(f'Ignoring retrieval of entity contexts because ec_max_contexts is {self.args.ec_max_contexts}')
-                return
 
             if self.args.ec_keyword_provider == 'vss':
                 keyword_provider = KeywordVSSProvider(self.graph_store, self.vector_store, self.args, self.filter_config)
@@ -221,7 +228,7 @@ class TraversalBasedBaseRetriever(BaseRetriever):
 
             keywords = keyword_provider.get_keywords(query_bundle)
             entities = entity_provider.get_entities(keywords, query_bundle)
-            entity_contexts = entity_context_provider.get_entity_contexts(entities, query_bundle)
+            entity_contexts = entity_context_provider.get_entity_contexts(entities, keywords, query_bundle)
 
             end = time.time()
             duration_ms = (end-start) * 1000
@@ -229,6 +236,7 @@ class TraversalBasedBaseRetriever(BaseRetriever):
             logger.debug(f'Retrieved {len(entity_contexts.contexts)} entity contexts ({duration_ms:.2f}ms)')
 
             self.entity_contexts.contexts.extend(entity_contexts.contexts)
+            self.entity_contexts.keywords.extend(keywords)
 
     def _retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
         """
@@ -249,7 +257,7 @@ class TraversalBasedBaseRetriever(BaseRetriever):
         
         start_retrieve = time.time()
 
-        self._init_entity_contexts(query_bundle)
+        self._init(query_bundle)
         
         start_node_ids = self.get_start_node_ids(query_bundle)
         search_results:SearchResultCollection = self.do_graph_search(query_bundle, start_node_ids)
@@ -313,7 +321,7 @@ class TraversalBasedBaseRetriever(BaseRetriever):
             if isinstance(result, SearchResult):
                 search_results.append(result)
             elif result['result'].get('source', None):
-                search_results.append(SearchResult.model_validate(result['result']) )
+                search_results.append(SearchResult.model_validate(result['result']))
 
         try:
             toolkit_version = f" ({version('graphrag-toolkit-lexical-graph')})"

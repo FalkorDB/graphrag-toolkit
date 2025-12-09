@@ -6,6 +6,7 @@ from typing import List
 from llama_index.core.schema import TextNode, BaseNode
 from llama_index.core.schema import NodeRelationship
 
+from graphrag_toolkit.lexical_graph.versioning import VERSION_INDEPENDENT_ID_FIELDS
 from graphrag_toolkit.lexical_graph.indexing.build.node_builder import NodeBuilder
 from graphrag_toolkit.lexical_graph.indexing.constants import TOPICS_KEY
 from graphrag_toolkit.lexical_graph.storage.constants import INDEX_KEY
@@ -50,7 +51,7 @@ class SourceNodeBuilder(NodeBuilder):
         """
         return [TOPICS_KEY]
     
-    def build_nodes(self, nodes:List[BaseNode]):
+    def build_nodes(self, nodes:List[BaseNode], **kwargs):
         """
         Builds and returns a list of TextNode objects corresponding to source nodes derived
         from the input `nodes`. The constructed nodes contain processed metadata and
@@ -65,6 +66,8 @@ class SourceNodeBuilder(NodeBuilder):
                 relationships and metadata configurations found in the provided `nodes`.
         """
         source_nodes = {}
+
+        build_timestamp = self._get_build_timestamp(**kwargs)
 
         for node in nodes:
             
@@ -81,17 +84,23 @@ class SourceNodeBuilder(NodeBuilder):
                 
                 if source_info.metadata:
                     metadata['source']['metadata'] = self.source_metadata_formatter.format(source_info.metadata)
+
+                metadata = self._update_metadata_with_versioning_info(metadata, node, build_timestamp)
+
+                if VERSION_INDEPENDENT_ID_FIELDS in node.metadata:
+                    version_independent_id_fields = node.metadata[VERSION_INDEPENDENT_ID_FIELDS]
+                    metadata['source']['versioning']['id_fields'] = sorted(version_independent_id_fields) if isinstance(version_independent_id_fields, list) else [version_independent_id_fields]
                     
                 metadata[INDEX_KEY] = {
                     'index': 'source',
                     'key': self._clean_id(source_id)
                 }
-                
+
                 source_node = TextNode(
                     id_ = source_id,
                     metadata = metadata,
-                    excluded_embed_metadata_keys = [INDEX_KEY],
-                    excluded_llm_metadata_keys = [INDEX_KEY]
+                    excluded_embed_metadata_keys = [INDEX_KEY, 'source'],
+                    excluded_llm_metadata_keys = [INDEX_KEY, 'source']
                 )
 
                 source_nodes[source_id] = source_node

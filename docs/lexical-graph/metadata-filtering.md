@@ -6,6 +6,7 @@
 
   - [Overview](#overview)
   - [Adding metadata when indexing](#adding-metadata-when-indexing)
+    - [Metadata and versioned updates](#metadata-and-versioned-uupdates)
     - [Adding metadata to web pages](#adding-metadata-to-web-pages)
     - [Adding metadata to JSON documents](#adding-metadata-to-json-documents)
     - [Adding metadata to PDF documents](#adding-metadata-to-pdf-documents)
@@ -26,7 +27,7 @@
 
 Metadata filtering allows you to retrieve a constrained set of sources, topics and statements based on metadata filters and associated values when querying a lexical graph.
 
-Metadata is any data added to the metadata dictionary of a source document. Depending on the source document, examples of metadata may include _title_, _url_, _filepath_, _date published_, and _author_. A source document's metadata is then associated with any chunks, topics and statements extracted from that document.
+Metadata is any data added to the metadata dictionary of a source document. Depending on the source document, examples of metadata may include `title`, `url`, `filepath`, `date published`, and `author`. A source document's metadata is then associated with any chunks, topics and statements extracted from that document.
 
 There are two parts to metadata filtering:
 
@@ -38,6 +39,15 @@ You can also use metadata filtering to [filter documents and chunks during the e
 ### Adding metadata when indexing
 
 The effectiveness of metadata filtering during querying is dependent on the quality of the metadata attached to source documents during ingestion. [Different loaders](https://docs.llamaindex.ai/en/stable/understanding/loading/loading/) have different mechanisms for adding metadata to ingested documents. Here are some examples.
+
+#### Metadata and versioned updates
+
+The lexical graphs supports [versioned updates](./versioned-updates.mds). With versioned updates, if you re-ingest a document whose contents and/or metadata have changed since it was last extracted, any old documents will be archived, and the newly ingested document treated as the current version of the source document.
+
+Versioned updates uses a concept of _version-independent metadata fields_ to represent a documents' stable (i.e. version-independent) identify. When you index a document, you can specify which of that document's metadata fields represent its stable identify. For example, if a document has `title`, `author` and `last_updated` metadata fields, you might specify that a combination of the `title` and `author` metadata fields represent that document's stable identify. When the document is indexed, any previously indexed, non-versioned documents whose `title` and `author` field _values_ match those of the newly ingested document will be archived.
+
+When choosing which metadata to add to each source document that you ingest, bear in mind this use of metadata for versioning updates. Try to ensure that one of the fields, or a combination of multiple field values, constitute a stable identity.
+
 
 #### Adding metadata to web pages
 

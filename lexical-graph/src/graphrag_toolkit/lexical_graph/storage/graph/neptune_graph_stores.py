@@ -426,7 +426,6 @@ class NeptuneDatabaseClient(GraphStore):
         """
         query_id = uuid.uuid4().hex[:5]
         
-        
         request_log_entry_parameters = self.log_formatting.format_log_entry(
             self._logging_prefix(query_id, correlation_id), 
             cypher, 
@@ -441,7 +440,7 @@ class NeptuneDatabaseClient(GraphStore):
             openCypherQuery=request_log_entry_parameters.format_query_with_query_ref(cypher),
             parameters=json.dumps(parameters)
         )
-
+        
         end = time.time()
 
         results = response['results']

@@ -10,6 +10,7 @@ from typing import List, Sequence, Dict, Any, Optional, Callable
 from urllib.parse import urlparse
 
 from graphrag_toolkit.lexical_graph.metadata import FilterConfig, type_name_for_key_value, format_datetime
+from graphrag_toolkit.lexical_graph.versioning import VALID_FROM, VALID_TO, TIMESTAMP_LOWER_BOUND, TIMESTAMP_UPPER_BOUND
 from graphrag_toolkit.lexical_graph.config import GraphRAGConfig, EmbeddingType
 from graphrag_toolkit.lexical_graph.storage.vector import VectorIndex, to_embedded_query
 from graphrag_toolkit.lexical_graph.storage.constants import INDEX_KEY
@@ -17,7 +18,6 @@ from graphrag_toolkit.lexical_graph.storage.constants import INDEX_KEY
 from llama_index.core.schema import BaseNode, QueryBundle
 from llama_index.core.indices.utils import embed_nodes
 from llama_index.core.vector_stores.types import FilterCondition, FilterOperator, MetadataFilter, MetadataFilters
-
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,10 @@ except ImportError as e:
     raise ImportError(
         "psycopg2 and/or pgvector packages not found, install with 'pip install psycopg2-binary pgvector'"
     ) from e
+    
+def _type_name_for_key_value(key: str, value: Any) -> str:
+    type_name = type_name_for_key_value(key, value)
+    return 'bigint' if type_name == 'int' else type_name
     
 
 def to_sql_operator(operator: FilterOperator) -> tuple[str, Callable[[Any], str]]:
@@ -97,7 +101,7 @@ def formatter_for_type(type_name:str) -> Callable[[Any], str]:
         return lambda x: f"'{x}'"
     elif type_name == 'timestamp':
         return lambda x: f"'{format_datetime(x)}'"
-    elif type_name in ['int', 'float']:
+    elif type_name in ['bigint', 'int', 'float']:
         return lambda x:x
     else:
         raise ValueError(f'Unsupported type name: {type_name}')
@@ -143,7 +147,12 @@ def parse_metadata_filters_recursive(metadata_filters:MetadataFilters) -> str:
             str: A string representation of the metadata filters formatted for database
                 queries.
         """
-        return f"metadata->'source'->'metadata'->>'{key}'"
+        if key == VALID_FROM:
+            return 'valid_from'
+        elif key == VALID_TO:
+            return 'valid_to'
+        else:
+            return f"metadata->'source'->'metadata'->>'{key}'"
     
     def to_sql_filter(f: MetadataFilter) -> str:
         """
@@ -168,7 +177,7 @@ def parse_metadata_filters_recursive(metadata_filters:MetadataFilters) -> str:
         if f.operator == FilterOperator.IS_EMPTY:
             return f"({key} {operator})"
         else:
-            type_name = type_name_for_key_value(f.key, f.value)
+            type_name = _type_name_for_key_value(f.key, f.value)
             type_formatter = formatter_for_type(type_name)
             return f"(({key})::{type_name} {operator} {type_formatter(operator_formatter(str(f.value)))})"
     
@@ -368,34 +377,32 @@ class PGIndex(VectorIndex):
                             {self.index_name}Id VARCHAR(255) unique,
                             value text,
                             metadata jsonb,
-                            embedding vector({self.dimensions})
+                            embedding vector({self.dimensions}),
+                            valid_from BIGINT DEFAULT {TIMESTAMP_LOWER_BOUND},
+                            valid_to BIGINT DEFAULT {TIMESTAMP_UPPER_BOUND}
                             );'''
                         )
                     except UniqueViolation:
                         # For alt approaches, see: https://stackoverflow.com/questions/29900845/create-schema-if-not-exists-raises-duplicate-key-error
                         logger.warning(f"Table already exists, so ignoring CREATE: {self.underlying_index_name()}")
-                        pass
 
                     index_name = f'{self.underlying_index_name()}_{self.index_name}Id_idx'
                     try:
                         cur.execute(f'CREATE INDEX IF NOT EXISTS {index_name} ON {self.schema_name}.{self.underlying_index_name()} USING hash ({self.index_name}Id);')
                     except UniqueViolation:
                         logger.warning(f"Index already exists, so ignoring CREATE: {index_name}")
-                        pass
 
                     index_name = f'{self.underlying_index_name()}_{self.index_name}Id_embedding_idx'
                     try:
                         cur.execute(f'CREATE INDEX IF NOT EXISTS {index_name} ON {self.schema_name}.{self.underlying_index_name()} USING hnsw (embedding vector_l2_ops)')
                     except UniqueViolation:
                         logger.warning(f"Index already exists, so ignoring CREATE: {index_name}")
-                        pass
                     
                     index_name = f'{self.underlying_index_name()}_{self.index_name}Id_gin_idx'
                     try:
                         cur.execute(f'CREATE INDEX IF NOT EXISTS {index_name} ON {self.schema_name}.{self.underlying_index_name()} USING GIN (metadata)')
                     except UniqueViolation:
                         logger.warning(f"Index already exists, so ignoring CREATE: {index_name}")
-                        pass
 
             finally:
                 cur.close()
@@ -435,9 +442,12 @@ class PGIndex(VectorIndex):
                 nodes, self.embed_model
             )
             for node in nodes:
+
+                valid_from = node.metadata.get('source', {}).get('versioning', {}).get('valid_from', TIMESTAMP_LOWER_BOUND) 
+
                 cur.execute(
-                    f'INSERT INTO {self.schema_name}.{self.underlying_index_name()} ({self.index_name}Id, value, metadata, embedding) SELECT %s, %s, %s, %s WHERE NOT EXISTS (SELECT * FROM {self.schema_name}.{self.underlying_index_name()} c WHERE c.{self.index_name}Id = %s);',
-                    (node.id_, node.text,  json.dumps(node.metadata), id_to_embed_map[node.id_], node.id_)
+                    f'INSERT INTO {self.schema_name}.{self.underlying_index_name()} ({self.index_name}Id, value, metadata, embedding, valid_from) SELECT %s, %s, %s, %s, %s WHERE NOT EXISTS (SELECT * FROM {self.schema_name}.{self.underlying_index_name()} c WHERE c.{self.index_name}Id = %s);',
+                    (node.id_, node.text,  json.dumps(node.metadata), id_to_embed_map[node.id_], valid_from, node.id_)
                 )
 
         except UndefinedTable as e:
@@ -477,6 +487,9 @@ class PGIndex(VectorIndex):
             'score': round(r[2], 7)
         }
 
+        valid_from = r[3]
+        valid_to = r[4]
+
         metadata_payload = r[1]
         if isinstance(metadata_payload, dict):
             metadata = metadata_payload
@@ -488,6 +501,8 @@ class PGIndex(VectorIndex):
             result[index_name] = metadata[index_name]
             if 'source' in metadata:
                 result['source'] = metadata['source']
+                result['source']['versioning']['valid_from'] = valid_from
+                result['source']['versioning']['valid_to'] = valid_to
         else:
             for k,v in metadata.items():
                 result[k] = v
@@ -518,6 +533,8 @@ class PGIndex(VectorIndex):
         """
         id = r[0]
         value = r[1]
+        valid_from = r[4]
+        valid_to = r[5]
 
         metadata_payload = r[2]
         if isinstance(metadata_payload, dict):
@@ -536,6 +553,10 @@ class PGIndex(VectorIndex):
         for k,v in metadata.items():
             if k != INDEX_KEY:
                 result[k] = v
+
+        if 'source' in result:
+            result['source']['versioning']['valid_from'] = valid_from
+            result['source']['versioning']['valid_to'] = valid_to
             
         return result
     
@@ -576,7 +597,7 @@ class PGIndex(VectorIndex):
 
             query_bundle = to_embedded_query(query_bundle, self.embed_model)
 
-            sql = f'''SELECT {self.index_name}Id, metadata, embedding <-> %s AS score
+            sql = f'''SELECT {self.index_name}Id, metadata, embedding <-> %s AS score, valid_from, valid_to
                 FROM {self.schema_name}.{self.underlying_index_name()}
                 {where_clause}
                 ORDER BY score ASC LIMIT %s;'''
@@ -631,7 +652,7 @@ class PGIndex(VectorIndex):
 
         try:
 
-            cur.execute(f'''SELECT {self.index_name}Id, value, metadata, embedding
+            cur.execute(f'''SELECT {self.index_name}Id, value, metadata, embedding, valid_from, valid_to
                 FROM {self.schema_name}.{self.underlying_index_name()}
                 WHERE {self.index_name}Id IN ({format_ids(ids)});'''
             )
@@ -650,3 +671,46 @@ class PGIndex(VectorIndex):
             dbconn.close()
 
         return get_embeddings_results
+    
+    def update_versioning(self, versioning_timestamp:int, ids:List[str]=[]):
+        
+        dbconn = self._get_connection()
+        cur = dbconn.cursor()
+
+        def format_ids(ids):
+            return ','.join([f"'{id}'" for id in set(ids)])
+        
+        try:
+
+            cur.execute(f'''UPDATE {self.schema_name}.{self.underlying_index_name()}
+                SET valid_to = {versioning_timestamp}
+                WHERE {self.index_name}Id IN ({format_ids(ids)});'''
+            )
+
+        except UndefinedTable as e:
+            logger.warning(f'Index {self.underlying_index_name()} does not exist')
+
+        finally:
+            cur.close()
+            dbconn.close()
+
+        return []
+
+    def enable_for_versioning(self, ids:List[str]=[]):
+        
+        dbconn = self._get_connection()
+        cur = dbconn.cursor() 
+
+        try:
+            cur.execute(f'''ALTER TABLE {self.schema_name}.{self.underlying_index_name()}
+                ADD COLUMN IF NOT EXISTS valid_from BIGINT DEFAULT {TIMESTAMP_LOWER_BOUND},
+                ADD COLUMN IF NOT EXISTS valid_to BIGINT DEFAULT {TIMESTAMP_UPPER_BOUND};'''
+            )
+        except UniqueViolation:
+            logger.warning(f"Columns already exist, so ignoring ALTER: {self.underlying_index_name()}")
+
+        finally:
+            cur.close()
+            dbconn.close()
+
+        return []

@@ -9,14 +9,16 @@ from json2xml import json2xml
 from typing import Optional, List, Type, Union
 
 from graphrag_toolkit.lexical_graph.metadata import FilterConfig
+from graphrag_toolkit.lexical_graph.versioning import VersioningConfig
 from graphrag_toolkit.lexical_graph.tenant_id import TenantIdType, to_tenant_id
 from graphrag_toolkit.lexical_graph.config import GraphRAGConfig
 from graphrag_toolkit.lexical_graph.utils import LLMCache, LLMCacheType
 from graphrag_toolkit.lexical_graph.retrieval.post_processors.bedrock_context_format import BedrockContextFormat
-from graphrag_toolkit.lexical_graph.retrieval.model import EntityContexts
 from graphrag_toolkit.lexical_graph.retrieval.retrievers import CompositeTraversalBasedRetriever, SemanticGuidedRetriever, QueryModeRetriever
 from graphrag_toolkit.lexical_graph.retrieval.retrievers import StatementCosineSimilaritySearch, KeywordRankingSearch, SemanticBeamGraphSearch
 from graphrag_toolkit.lexical_graph.retrieval.retrievers import WeightedTraversalBasedRetrieverType, SemanticGuidedRetrieverType
+from graphrag_toolkit.lexical_graph.retrieval.model import EntityContexts
+from graphrag_toolkit.lexical_graph.retrieval.retrievers import CompositeTraversalBasedRetriever, QueryModeRetriever
 from graphrag_toolkit.lexical_graph.storage import GraphStoreFactory, GraphStoreType
 from graphrag_toolkit.lexical_graph.storage import VectorStoreFactory, VectorStoreType
 from graphrag_toolkit.lexical_graph.storage.graph import MultiTenantGraphStore
@@ -40,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 RetrieverType = Union[BaseRetriever, Type[BaseRetriever]]
 PostProcessorsType = Union[BaseNodePostprocessor, List[BaseNodePostprocessor]]
+VersioningType = Union[bool, VersioningConfig]
 
 
 class LexicalGraphQueryEngine(BaseQueryEngine):
@@ -66,7 +69,8 @@ class LexicalGraphQueryEngine(BaseQueryEngine):
                                    tenant_id: Optional[TenantIdType] = None,
                                    retrievers: Optional[List[WeightedTraversalBasedRetrieverType]] = None,
                                    post_processors: Optional[PostProcessorsType] = None,
-                                   filter_config: FilterConfig = None,
+                                   filter_config: Optional[FilterConfig] = None,
+                                   versioning: Optional[VersioningType] = None,
                                    **kwargs):
         """
         Constructs an instance of LexicalGraphQueryEngine configured for traversal-based search.
@@ -95,7 +99,14 @@ class LexicalGraphQueryEngine(BaseQueryEngine):
                 search, encapsulating all specified stores, retrievers, and configurations.
         """
         tenant_id = to_tenant_id(tenant_id)
+
+        if versioning is not None:
+            versioning_config = VersioningConfig(enabled=versioning) if isinstance(versioning, bool) else versioning
+        else:
+            versioning_config = VersioningConfig(enabled=GraphRAGConfig.enable_versioning)
+
         filter_config = filter_config or FilterConfig()
+        filter_config = filter_config.with_versioning(versioning_config)
         
         graph_store =  MultiTenantGraphStore.wrap(
             GraphStoreFactory.for_graph_store(graph_store), 
@@ -140,6 +151,7 @@ class LexicalGraphQueryEngine(BaseQueryEngine):
                                    retrievers: Optional[List[SemanticGuidedRetrieverType]] = None,
                                    post_processors: Optional[PostProcessorsType] = None,
                                    filter_config: FilterConfig = None,
+                                   enable_versioning: Optional[VersioningType] = None,
                                    **kwargs):
         """
         Creates and configures an instance of `LexicalGraphQueryEngine` for semantic-guided
@@ -168,7 +180,14 @@ class LexicalGraphQueryEngine(BaseQueryEngine):
             on the provided graph and vector store.
         """
         tenant_id = to_tenant_id(tenant_id)
+        
+        if enable_versioning is not None:
+            versioning_config = VersioningConfig(enabled=enable_versioning) if isinstance(enable_versioning, bool) else enable_versioning
+        else:
+            versioning_config = VersioningConfig(enabled=GraphRAGConfig.enable_versioning)
+
         filter_config = filter_config or FilterConfig()
+        filter_config = filter_config.with_versioning(versioning_config)
 
         graph_store = MultiTenantGraphStore.wrap(
             GraphStoreFactory.for_graph_store(graph_store),
@@ -268,14 +287,18 @@ class LexicalGraphQueryEngine(BaseQueryEngine):
         )
 
         self.context_format = kwargs.get('context_format', 'json')
+        self.verbose = kwargs.pop('verbose', True)
+        
+        no_cache = kwargs.pop('no_cache', False)
+        enable_cache = False if no_cache else GraphRAGConfig.enable_cache
 
         self.llm = llm if llm and isinstance(llm, LLMCache) else LLMCache(
             llm=llm or GraphRAGConfig.response_llm,
-            enable_cache=GraphRAGConfig.enable_cache
+            enable_cache=enable_cache
         )
         self.streaming = streaming
 
-        prompt_provider = kwargs.pop("prompt_provider", None)
+        prompt_provider = kwargs.pop('prompt_provider', None)
         
         if prompt_provider is None:
             prompt_provider = PromptProviderFactory.get_provider()
@@ -333,7 +356,8 @@ class LexicalGraphQueryEngine(BaseQueryEngine):
                 prompt=self.chat_template,
                 query=query_bundle.query_str,
                 search_results=search_results,
-                additionalContext='\n'.join(additional_context)
+                additionalContext='\n'.join(additional_context),
+                answer_mode='fully' if self.verbose else 'concisely'
             )
             return response
         except Exception:
@@ -360,27 +384,25 @@ class LexicalGraphQueryEngine(BaseQueryEngine):
             raise
 
     def _format_as_text(self, json_results):
-        """
-        Formats the given JSON results into a text representation with specific formatting. Each item in the JSON
-        results is processed to include its topic, associated statements, and source. The output is a concatenation
-        of these formatted components.
 
-        Args:
-            json_results (list[dict]): A list of dictionaries where each dictionary represents a result.
-                Each dictionary must contain the following keys:
-                - topic (str): The topic of the result.
-                - statements (list[str]): A list of statements related to the topic.
-                - source (str): The source where the result originated from.
+        def topic_as_text(topic, source):
+            topic_lines = []
+            topic_lines.append(f"""## {topic['topic']}""")
+            topic_lines.append(' '.join([s for s in topic['statements']]))
+            topic_lines.append(f"""[Source: {source}]""")
+            topic_lines.append('\n')
+            return topic_lines
 
-        Returns:
-            str: A string representation of the formatted results, including the topics, statements, and sources.
-        """
         lines = []
+
         for json_result in json_results:
-            lines.append(f"""## {json_result['topic']}""")
-            lines.append(' '.join([s for s in json_result['statements']]))
-            lines.append(f"""[Source: {json_result['source']}]""")
-            lines.append('\n')
+            source = json_result['source']
+            if 'topics' in json_result:
+                for topic in json_result['topics']:
+                    lines.extend(topic_as_text(topic, source))
+            else:
+                lines.extend(topic_as_text(json_result, source))
+
         return '\n'.join(lines)
 
     def _format_context(self, search_results: List[NodeWithScore], context_format: str = 'json'):
@@ -430,7 +452,7 @@ class LexicalGraphQueryEngine(BaseQueryEngine):
         if not contexts_dump:
             return []
  
-        return EntityContexts.model_validate(contexts_dump).context_strs
+        return EntityContexts.model_validate(contexts_dump).all_context_strs
 
 
     def retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
@@ -457,7 +479,7 @@ class LexicalGraphQueryEngine(BaseQueryEngine):
             results = post_processor.postprocess_nodes(results, query_bundle)
 
         return results
-    
+     
     def _query(self, query_bundle: QueryBundle) -> RESPONSE_TYPE:
         """
         Executes a query against the system and processes the results to generate a

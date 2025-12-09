@@ -111,6 +111,9 @@ class EntityGraphBuilder(GraphBuilder):
 
                 def insert_domain_entity(entity:Entity):
 
+                    if entity.classification and entity.classification == LOCAL_ENTITY_CLASSIFICATION:
+                        return
+
                     e_var = new_query_var()
                     e_id = entity.entityId
                     e_label = label_from(entity.classification or DEFAULT_CLASSIFICATION)

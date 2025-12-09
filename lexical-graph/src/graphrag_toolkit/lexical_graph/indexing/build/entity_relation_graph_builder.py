@@ -79,8 +79,7 @@ class EntityRelationGraphBuilder(GraphBuilder):
                 statements.append(f'MERGE (object:`__Entity__`{{{graph_client.node_id("entityId")}: params.o_id}})')
 
                 statements.extend([
-                    'MERGE (subject)-[r:`__RELATION__`{value: params.p}]->(object)',
-                    'ON CREATE SET r.count = 1 ON MATCH SET r.count = r.count + 1'
+                    'MERGE (subject)-[r:`__RELATION__`{value: params.p}]->(object)'
                 ])
 
                 properties = {
@@ -93,27 +92,26 @@ class EntityRelationGraphBuilder(GraphBuilder):
                     
                 graph_client.execute_query_with_retry(query, self._to_params(properties), max_attempts=5, max_wait=7)
 
-                if include_domain_labels:
+                # if include_domain_labels:
 
-                    s_var = new_query_var()
-                    o_var = new_query_var()
-                    r_var = new_query_var()
-                    s_id = fact.subject.entityId
-                    o_id = fact.object.entityId
-                    r_name = relationship_name_from(fact.predicate.value)
-                    r_comment = f'// awsqid:{s_id}-{r_name}-{o_id}'
+                #     s_var = new_query_var()
+                #     o_var = new_query_var()
+                #     r_var = new_query_var()
+                #     s_id = fact.subject.entityId
+                #     o_id = fact.object.entityId
+                #     r_name = relationship_name_from(fact.predicate.value)
+                #     r_comment = f'// awsqid:{s_id}-{r_name}-{o_id}'
 
-                    statements_r = [
-                        f"MERGE ({s_var}:`__Entity__`{{{graph_client.node_id('entityId')}: '{s_id}'}})",
-                        f"MERGE ({o_var}:`__Entity__`{{{graph_client.node_id('entityId')}: '{o_id}'}})",
-                        f"MERGE ({s_var})-[{r_var}:`{r_name}`]->({o_var})",
-                        f"ON CREATE SET {r_var}.count = 1 ON MATCH SET {r_var}.count = {r_var}.count + 1",
-                        r_comment
-                    ]
+                #     statements_r = [
+                #         f"MERGE ({s_var}:`__Entity__`{{{graph_client.node_id('entityId')}: '{s_id}'}})",
+                #         f"MERGE ({o_var}:`__Entity__`{{{graph_client.node_id('entityId')}: '{o_id}'}})",
+                #         f"MERGE ({s_var})-[{r_var}:`{r_name}`]->({o_var})",
+                #         r_comment
+                #     ]
 
-                    query_r = ' '.join(statements_r)
+                #     query_r = ' '.join(statements_r)
 
-                    graph_client.execute_query_with_retry(query_r, {}, max_attempts=5, max_wait=7)
+                #     graph_client.execute_query_with_retry(query_r, {}, max_attempts=5, max_wait=7)
             
             elif include_local_entities and fact.subject and fact.complement:
         
@@ -128,8 +126,7 @@ class EntityRelationGraphBuilder(GraphBuilder):
                 statements.append(f'MERGE (complement:`__Entity__`{{{graph_client.node_id("entityId")}: params.c_id}})')
 
                 statements.extend([
-                    'MERGE (subject)-[r:`__RELATION__`{value: params.p}]->(complement)',
-                    'ON CREATE SET r.count = 1 ON MATCH SET r.count = r.count + 1'
+                    'MERGE (subject)-[r:`__RELATION__`{value: params.p}]->(complement)'
                 ])
 
                 properties = {
@@ -142,27 +139,27 @@ class EntityRelationGraphBuilder(GraphBuilder):
                     
                 graph_client.execute_query_with_retry(query, self._to_params(properties), max_attempts=5, max_wait=7)
 
-                if include_domain_labels:
+                # if include_domain_labels:
 
-                    s_var = new_query_var()
-                    c_var = new_query_var()
-                    r_var = new_query_var()
-                    s_id = fact.subject.entityId
-                    c_id = fact.complement.entityId
-                    r_name = relationship_name_from(fact.predicate.value)
-                    r_comment = f'// awsqid:{s_id}-{r_name}-{c_id}'
+                #     s_var = new_query_var()
+                #     c_var = new_query_var()
+                #     r_var = new_query_var()
+                #     s_id = fact.subject.entityId
+                #     c_id = fact.complement.entityId
+                #     r_name = relationship_name_from(fact.predicate.value)
+                #     r_comment = f'// awsqid:{s_id}-{r_name}-{c_id}'
 
-                    statements_r = [
-                        f"MERGE ({s_var}:`__Entity__`{{{graph_client.node_id('entityId')}: '{s_id}'}})",
-                        f"MERGE ({c_var}:`__Entity__`{{{graph_client.node_id('entityId')}: '{c_id}'}})",
-                        f"MERGE ({s_var})-[{r_var}:`{r_name}`]->({c_var})",
-                        f"ON CREATE SET {r_var}.count = 1 ON MATCH SET {r_var}.count = {r_var}.count + 1",
-                        r_comment
-                    ]
+                #     statements_r = [
+                #         f"MATCH ({s_var}:`__Entity__`{{{graph_client.node_id('entityId')}: '{s_id}'}})",
+                #         f"({c_var}:`__Entity__`{{{graph_client.node_id('entityId')}: '{c_id}'}})",
+                #         "WITH s_var, c_var",
+                #         f"MERGE ({s_var})-[{r_var}:`{r_name}`]->({c_var})",
+                #         r_comment
+                #     ]
 
-                    query_r = ' '.join(statements_r)
+                #     query_r = ' '.join(statements_r)
 
-                    graph_client.execute_query_with_retry(query_r, {}, max_attempts=5, max_wait=7)
+                #     graph_client.execute_query_with_retry(query_r, {}, max_attempts=5, max_wait=7)
 
             else:
                 logger.debug(f'Neither an SPO nor SPC fact, so not creating relation [fact_id: {fact.factId}]')

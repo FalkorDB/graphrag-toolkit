@@ -6,7 +6,6 @@ from typing import List
 from llama_index.core.schema import BaseNode, DEFAULT_TEXT_NODE_TMPL
 from llama_index.core.schema import NodeRelationship
 
-from graphrag_toolkit.lexical_graph.indexing.build.build_filters import BuildFilters
 from graphrag_toolkit.lexical_graph.indexing.build.node_builder import NodeBuilder
 from graphrag_toolkit.lexical_graph.indexing.constants import TOPICS_KEY
 from graphrag_toolkit.lexical_graph.storage.constants import INDEX_KEY
@@ -54,7 +53,7 @@ class ChunkNodeBuilder(NodeBuilder):
         """
         return [TOPICS_KEY]
     
-    def build_nodes(self, nodes:List[BaseNode]):
+    def build_nodes(self, nodes:List[BaseNode], **kwargs):
         """
         Constructs and returns a list of processed chunk nodes by iterating through
         a list of input nodes, applying transformations, and filtering metadata.
@@ -68,6 +67,8 @@ class ChunkNodeBuilder(NodeBuilder):
             relationships, and excluded keys for embedding and LLM usage.
         """
         chunk_nodes = []
+
+        build_timestamp = self._get_build_timestamp(**kwargs)
 
         for node in nodes:
 
@@ -96,6 +97,8 @@ class ChunkNodeBuilder(NodeBuilder):
                 
             if source_info.metadata:
                 metadata['source']['metadata'] = source_info.metadata
+
+            metadata = self._update_metadata_with_versioning_info(metadata, node, build_timestamp)
             
             metadata[INDEX_KEY] = {
                 'index': 'chunk',

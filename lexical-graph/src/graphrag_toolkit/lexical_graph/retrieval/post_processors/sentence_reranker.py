@@ -7,7 +7,7 @@ from typing import List, Tuple, Optional, Any
 from graphrag_toolkit.lexical_graph.retrieval.post_processors import RerankerMixin
 from graphrag_toolkit.lexical_graph.utils.reranker_utils import to_float
 
-from llama_index.core.bridge.pydantic import Field
+from llama_index.core.bridge.pydantic import Field, PrivateAttr
 from llama_index.core.postprocessor import SentenceTransformerRerank
 from llama_index.core.schema import NodeWithScore, QueryBundle
 

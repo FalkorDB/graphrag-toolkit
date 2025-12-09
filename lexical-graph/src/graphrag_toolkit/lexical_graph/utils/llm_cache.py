@@ -112,8 +112,12 @@ class LLMCache(BaseModel):
             except Exception as e:
                 raise ModelError(f'{e!s} [Model config: {self.llm.to_json()}]') from e
         else:
-            
-            cache_key = f'{self.llm.to_json()},{prompt.format(**prompt_args)}'
+
+            prompt_args_copy = prompt_args.copy()
+            for key in prompt_args.get('exclude_cache_keys', []):
+                del prompt_args_copy[key]
+
+            cache_key = f'{self.llm.to_json()},{prompt.format(**prompt_args_copy)}'
             cache_hex = sha256(cache_key.encode('utf-8')).hexdigest()
             cache_file = f'cache/llm/{cache_hex}.txt'
 

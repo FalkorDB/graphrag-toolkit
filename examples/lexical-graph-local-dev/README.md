@@ -204,7 +204,7 @@ AWS_PROFILE="your-profile"
 
 # Model Configuration
 EMBEDDINGS_MODEL="cohere.embed-english-v3"
-EXTRACTION_MODEL="us.anthropic.claude-3-5-sonnet-20240620-v1:0"
+EXTRACTION_MODEL="us.anthropic.claude-3-7-sonnet-20250219-v1:0"
 ```
 
 ## Troubleshooting
@@ -240,7 +240,7 @@ docker-compose down -v
 ## AWS Foundation Model Access (Optional)
 
 For AWS Bedrock integration, ensure your AWS account has access to:
-- `anthropic.claude-3-5-sonnet-20240620-v1:0`
+- `anthropic.claude-3-7-sonnet-20250219-v1:0`
 - `cohere.embed-english-v3`
 
 Enable model access via the [Bedrock model access console](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html).

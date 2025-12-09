@@ -9,11 +9,12 @@
   - [Using batch inference with the LexicalGraphIndex](#using-batch-inference-with-the-lexicalgraphindex)
   - [Setup](#setup)
   - [Batch extraction job requirements](#batch-extraction-job-requirements)
-  - [Configuring batch extraction](#configuring-batch-extraction)
 
 ### Overview
 
-You can use [Amazon Bedrock batch inference](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html) in the extract stage of the indexing process to improve the performance of extraction on large datasets.
+You can use [Amazon Bedrock batch inference](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html) in the extract stage of the indexing process to improve extraction performance for large datasets.
+
+See [Configuring Batch Extraction](./configuring-batch-extraction.md) for details on configuring batch extraction for large ingests.
 
 ### Using batch inference with the LexicalGraphIndex
 
@@ -32,13 +33,14 @@ from llama_index.core import SimpleDirectoryReader
     
 def batch_extract_and_load():
     
-    GraphRAGConfig.extraction_batch_size = 100
+    GraphRAGConfig.extraction_batch_size = 1000
 
     batch_config = BatchConfig(
         region='us-west-2',
         bucket_name='my-bucket',
         key_prefix='batch-extract',
-        role_arn='arn:aws:iam::111111111111:role/my-batch-inference-role'
+        role_arn='arn:aws:iam::111111111111:role/my-batch-inference-role',
+        max_batch_size=40000
     )
 
     indexing_config = IndexingConfig(batch_config=batch_config)
@@ -62,7 +64,7 @@ def batch_extract_and_load():
 batch_extract_and_load()
 ```
 
-When using batch extraction, update the `GraphRAGConfig.extraction_batch_size` configuration parameter so that a large number of source documents are passed to a batch inference job in a single batch. In the example above, `GraphRAGConfig.extraction_batch_size` has been set to `100`, meaning that 100 source documents will be chunked simultaneously, and these chunks then sent to the batch inference job. If there are 10-20 chunks per document, the batch inference job here will process several thousand records in a single batch.
+When using batch extraction, update the `GraphRAGConfig.extraction_batch_size` configuration parameter so that a large number of source documents are passed to a batch inference job in a single batch. In the example above, `GraphRAGConfig.extraction_batch_size` has been set to `1000`, meaning that 1000 source documents will be chunked simultaneously, and these chunks then sent to the batch inference job. If there are 10-50 chunks per document, the batch inference job here will process several thousand records in a single batch, up to a maximum of 40,000 records (the configured `max_batch_size` value).
 
 ### Setup
 
@@ -173,7 +175,7 @@ Add the `iam:PassRole` permission so that the IAM identity under which the index
 
 ### Batch extraction job requirements
 
-Each batch extraction job must follow Amazon Bedrock's [batch inference quotas](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-data.html). The lexical-graph's batch extraction uses one input file per job.
+Each batch extraction job must follow Amazon Bedrock's [batch inference quotas](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-data.html). The lexical-graph's batch extraction feature uses one input file per job.
 
 #### Key requirements
 
@@ -182,34 +184,8 @@ Each batch extraction job must follow Amazon Bedrock's [batch inference quotas](
   - The feature doesn't check input file sizes — jobs will fail if they exceed Bedrock quotas
 
 #### Worker configuration
+
 Batch extraction can use multiple workers that trigger concurrent batch jobs:
 
   - If (workers × concurrent batches) exceeds Bedrock quotas, jobs will wait until capacity is available
 
-#### Important configuration settings
-
-  - `GraphRAGConfig.extraction_batch_size`: Sets how many source documents go to the extraction pipeline. Ensure (source documents × average chunks per document) is enough to fill your planned simultaneous batch jobs.
-  - `GraphRAGConfig.extraction_num_workers`: Sets how many CPUs run batch jobs simultaneously.
-  - `BatchConfig.max_num_concurrent_batches`: Sets how many concurrent batch jobs each worker runs.
-  - `BatchConfig.max_batch_size`: Sets the maximum number of chunks per batch job.
-
-### Configuring batch extraction
-
-The `BatchConfig` object has the following parameters:
-
-| Parameter  | Description | Mandatory | Default Value |
-| ------------- | ------------- | ------------- | ------------- |
-| `bucket_name` | Name of an Amazon S3 bucket where batch input and output files will be stored | Y | |
-| `region` | The name of the AWS Region in which the bucket is located and the Amazon Bedrock batch inference job will run (e.g. us-east-1) | Y | |
-| `role_arn` | The Amazon Resource Name (ARN) of the service role with permissions to carry out and manage batch inference (you can use the console to create a default service role or follow the steps at [Create a service role for batch inference](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-iam-sr.html)) | Y | |
-| `key_prefix` | S3 key prefix for input and output files | N | |
-| `max_batch_size` | Maximun number of records (chunks) to be included in each batch sent to each batch inference job | N | `25000` |
-| `max_num_concurrent_batches` | Maximum number of batch inference jobs to run concurrently per _worker_ (see [`GraphRAGConfig.extraction_num_workers`](./configuration.md#graphragconfig)) | N | `3` |
-| `s3_encryption_key_id` | The unique identifier of the key that encrypts the S3 location of the output data. | N | |
-| `subnet_ids` | An array of IDs for each subnet in the Virtual Private Cloud (VPC) used to protect batch inference jobs (for more information, see [Protect batch inference jobs using a VPC](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-vpc))| N | |
-| `security_group_ids` | An array of IDs for each security group in the Virtual Private Cloud (VPC) used to protect batch inference jobs (for more information, see [Protect batch inference jobs using a VPC](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-vpc))| N | |
-| `delete_on_success` | Delete the input and output JSON files from the local filesystem on successful completion of a batch job. Input and output files in S3 are not deleted. | N | `True` |
-
-#### Controlling access to batch extraction data
-
-The `BatchConfig` allows you to specify a custom KMS key to encrypt the data in S3, and supply VPC subnet and security group ids to [protect batch inference jobs using a VPC](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-vpc).

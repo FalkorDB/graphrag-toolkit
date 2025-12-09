@@ -8,9 +8,9 @@ from typing import Tuple, List, Optional, Sequence, Dict
 from graphrag_toolkit.lexical_graph.config import GraphRAGConfig
 from graphrag_toolkit.lexical_graph.utils import LLMCache, LLMCacheType
 from graphrag_toolkit.lexical_graph.indexing.utils.topic_utils import parse_extracted_topics, format_list, format_text
-from graphrag_toolkit.lexical_graph.indexing.extract.scoped_value_provider import ScopedValueProvider, FixedScopedValueProvider, DEFAULT_SCOPE
+from graphrag_toolkit.lexical_graph.indexing.extract.preferred_values import PreferredValuesProvider, default_preferred_values
 from graphrag_toolkit.lexical_graph.indexing.model import TopicCollection
-from graphrag_toolkit.lexical_graph.indexing.constants import TOPICS_KEY, DEFAULT_ENTITY_CLASSIFICATIONS
+from graphrag_toolkit.lexical_graph.indexing.constants import TOPICS_KEY
 from graphrag_toolkit.lexical_graph.indexing.prompts import EXTRACT_TOPICS_PROMPT
 
 from llama_index.core.schema import BaseNode
@@ -35,11 +35,11 @@ class TopicExtractor(BaseExtractor):
         description='Metadata field from which to extract information'
     )
 
-    entity_classification_provider:ScopedValueProvider = Field(
+    entity_classification_provider:PreferredValuesProvider = Field(
         description='Entity classification provider'
     )
 
-    topic_provider:ScopedValueProvider = Field(
+    topic_provider:PreferredValuesProvider = Field(
         description='Topic provider'
     )
 
@@ -96,8 +96,8 @@ class TopicExtractor(BaseExtractor):
             prompt_template=prompt_template or EXTRACT_TOPICS_PROMPT, 
             source_metadata_field=source_metadata_field,
             num_workers=num_workers or GraphRAGConfig.extraction_num_threads_per_worker,
-            entity_classification_provider=entity_classification_provider or FixedScopedValueProvider(scoped_values={DEFAULT_SCOPE: DEFAULT_ENTITY_CLASSIFICATIONS}),
-            topic_provider=topic_provider or FixedScopedValueProvider(scoped_values={DEFAULT_SCOPE: []})
+            entity_classification_provider=entity_classification_provider or default_preferred_values([]),
+            topic_provider=topic_provider or default_preferred_values([])
         )
 
         logger.debug(f'Prompt template: {self.prompt_template}')
@@ -167,27 +167,12 @@ class TopicExtractor(BaseExtractor):
             None
         """
         logger.debug(f'Extracting topics for node {node.node_id}')
-        
-        (entity_classification_scope, current_entity_classifications) = self.entity_classification_provider.get_current_values(node)
-        (topic_scope, current_topics) = self.topic_provider.get_current_values(node)
+
+        preferred_entity_classifications = self.entity_classification_provider(node)
+        preferred_topics = self.topic_provider(node)
         
         text = format_text(self._get_metadata_or_default(node.metadata, self.source_metadata_field, node.text) if self.source_metadata_field else node.text)
-        (topics, garbage) = await self._extract_topics(text, current_entity_classifications, current_topics)
-        
-        node_entity_classifications = [
-            entity.classification 
-            for topic in topics.topics
-            for entity in topic.entities
-            if entity.classification
-        ]
-        self.entity_classification_provider.update_values(entity_classification_scope, current_entity_classifications, node_entity_classifications)
-
-        node_topics = [
-            topic.value
-            for topic in topics.topics
-            if topic.value
-        ]
-        self.topic_provider.update_values(topic_scope, current_topics, node_topics)
+        (topics, garbage) = await self._extract_topics(text, preferred_entity_classifications, preferred_topics)
         
         return {
             TOPICS_KEY: topics.model_dump()
@@ -218,7 +203,8 @@ class TopicExtractor(BaseExtractor):
                 PromptTemplate(template=self.prompt_template),
                 text=text,
                 preferred_entity_classifications=format_list(preferred_entity_classifications),
-                preferred_topics=format_list(preferred_topics)
+                preferred_topics=format_list(preferred_topics),
+                #exclude_cache_keys=['preferred_entity_classifications', 'preferred_topics']
             )
         
         coro = asyncio.to_thread(blocking_llm_call)

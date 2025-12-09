@@ -1,8 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from graphrag_toolkit.lexical_graph.versioning import TIMESTAMP_UPPER_BOUND, TIMESTAMP_LOWER_BOUND
+
 from pydantic import BaseModel, ConfigDict, Field, AliasChoices
-from typing import List, Optional, Union, Dict
+from typing import List, Optional, Union
 
 class Statement(BaseModel):
     """
@@ -84,6 +86,15 @@ class Topic(BaseModel):
     chunks:List[Chunk]=[]
     statements:List[StatementType]=[]  
 
+class Versioning(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    valid_from:int = TIMESTAMP_LOWER_BOUND
+    valid_to:int = TIMESTAMP_UPPER_BOUND
+    extract_timestamp:int = TIMESTAMP_LOWER_BOUND
+    build_timestamp:int = TIMESTAMP_LOWER_BOUND
+    id_fields:List[str] = []
+
 class Source(BaseModel):
     """
     Represents a source entity with a unique identifier and associated metadata.
@@ -101,7 +112,8 @@ class Source(BaseModel):
     model_config = ConfigDict(strict=True)
     
     sourceId:str
-    metadata:Dict[str, str]={}
+    metadata:dict={}
+    versioning:Versioning
 
 SourceType = Union[str, Source]
 
@@ -181,6 +193,7 @@ class EntityContexts(BaseModel):
     model_config = ConfigDict(strict=True)
 
     contexts: List[EntityContext]=[]
+    keywords: List[str]=[]
 
     @property
     def context_strs(self):
@@ -188,6 +201,16 @@ class EntityContexts(BaseModel):
             ', '.join([entity.entity.value.lower() for entity in entity_context.entities])
             for entity_context in self.contexts
         ]
+    
+    @property
+    def keywords_str(self):
+        return ', '.join(keyword for keyword in self.keywords)
+    
+    @property
+    def all_context_strs(self):
+        all_contexts = [self.keywords_str] if self.keywords else []
+        all_contexts.extend(self.context_strs)
+        return all_contexts
 
 
 class SearchResultCollection(BaseModel):

@@ -6,6 +6,7 @@ from enum import Enum
 
 from graphrag_toolkit.lexical_graph.config import GraphRAGConfig
 from graphrag_toolkit.lexical_graph.utils import LLMCache, LLMCacheType
+from graphrag_toolkit.lexical_graph.retrieval.processors import ProcessorArgs
 
 from llama_index.core.prompts import PromptTemplate
 
@@ -28,11 +29,11 @@ class QueryMode(Enum):
 
 class QueryModeProvider():
     
-    def __init__(self, llm:LLMCacheType=None):
+    def __init__(self, args:ProcessorArgs, llm:LLMCacheType=None):
         
         self.llm = llm if llm and isinstance(llm, LLMCache) else LLMCache(
             llm=llm or GraphRAGConfig.response_llm,
-            enable_cache=GraphRAGConfig.enable_cache
+            enable_cache=GraphRAGConfig.enable_cache if not args.no_cache else not args.no_cache
         )
  
     def _get_query_mode(self, query:str):

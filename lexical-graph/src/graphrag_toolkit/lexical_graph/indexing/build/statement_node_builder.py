@@ -55,7 +55,7 @@ class StatementNodeBuilder(NodeBuilder):
         """
         return [TOPICS_KEY]
     
-    def build_nodes(self, nodes:List[BaseNode]):
+    def build_nodes(self, nodes:List[BaseNode], **kwargs):
         """
         Builds and processes nodes from the provided list of BaseNode objects. This method
         constructs 'statement' and 'fact' nodes with associated metadata and relationships,
@@ -79,6 +79,8 @@ class StatementNodeBuilder(NodeBuilder):
         """
         statement_nodes = {}
         fact_nodes = {}
+
+        build_timestamp = self._get_build_timestamp(**kwargs)
 
         for node in nodes:
 
@@ -106,7 +108,7 @@ class StatementNodeBuilder(NodeBuilder):
                 if self.build_filters.ignore_topic(topic.value):
                     continue
 
-                topic_id = self.id_generator.create_node_id('topic', source_id, topic.value) # topic identity defined by source, not chunk, so that we can connect same topic to multiple chunks in scope of single source
+                topic_id = self.id_generator.create_topic_id(source_id, topic.value) # topic identity defined by source, not chunk, so that we can connect same topic to multiple chunks in scope of single source
 
                 prev_statement = None
                 
@@ -115,7 +117,7 @@ class StatementNodeBuilder(NodeBuilder):
                     if self.build_filters.ignore_statement(statement.value):
                         continue
 
-                    statement_id = self.id_generator.create_node_id('statement', topic_id, statement.value)
+                    statement_id = self.id_generator.create_statement_id(topic_id, statement.value)
      
                     if statement_id not in statement_nodes:
 
@@ -131,6 +133,8 @@ class StatementNodeBuilder(NodeBuilder):
                                 'key': self._clean_id(statement_id)
                             }
                         }
+
+                        statement_metadata = self._update_metadata_with_versioning_info(statement_metadata, node, build_timestamp)
 
                         statement_details = '\n'.join(statement.details)
 
@@ -166,7 +170,7 @@ class StatementNodeBuilder(NodeBuilder):
                             fact.object.classification if fact.object else None
                         )
                         
-                        fact_id = self.id_generator.create_node_id('fact', fact_value)
+                        fact_id = self.id_generator.create_fact_id(fact_value)
 
                         lookup_id = f'{statement_id}-{fact_id}'
 
@@ -176,15 +180,18 @@ class StatementNodeBuilder(NodeBuilder):
                             fact.statementId = statement_id
 
                             if fact.subject.classification == LOCAL_ENTITY_CLASSIFICATION:
-                                fact.subject.entityId = self.id_generator.create_node_id('local-entity', fact.subject.value, source_id)
+                                fact.subject.entityId = self.id_generator.create_local_entity_id(source_id, fact.subject.value)
                             else:
-                                fact.subject.entityId = self.id_generator.create_node_id('entity', fact.subject.value, fact.subject.classification)
-                            
+                                fact.subject.entityId = self.id_generator.create_entity_id(fact.subject.value, fact.subject.classification)
+                                #fact.subject.entityId = self.id_generator.create_node_id('entity', fact.subject.value)
+                                
                             if fact.object:
-                                fact.object.entityId = self.id_generator.create_node_id('entity', fact.object.value, fact.object.classification)
+                                fact.object.entityId = self.id_generator.create_entity_id(fact.object.value, fact.object.classification)
+                                #fact.object.entityId = self.id_generator.create_node_id('entity', fact.object.value)
                             
                             if fact.complement:
-                                fact.complement.entityId = self.id_generator.create_node_id('local-entity', fact.complement.value, source_id)
+                                fact.complement.entityId = self.id_generator.create_local_entity_id(source_id, fact.complement.value)
+                                fact.complement.altEntityId = self.id_generator.create_entity_id(fact.complement.value, fact.complement.classification)
                             
                             fact_metadata = {
                                 'fact': fact.model_dump(),
@@ -197,8 +204,8 @@ class StatementNodeBuilder(NodeBuilder):
                             fact_node = TextNode( # don't specify id here - each fact node should be indexable because facts can be associated with multiple statements
                                 text = fact_value,
                                 metadata = fact_metadata,
-                                excluded_embed_metadata_keys = [INDEX_KEY, 'fact', 'source'],
-                                excluded_llm_metadata_keys = [INDEX_KEY, 'fact', 'source']
+                                excluded_embed_metadata_keys = [INDEX_KEY, 'fact'],
+                                excluded_llm_metadata_keys = [INDEX_KEY, 'fact']
                             )
 
                             fact_nodes[lookup_id] = fact_node

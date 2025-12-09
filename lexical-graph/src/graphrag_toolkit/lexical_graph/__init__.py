@@ -1,8 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: Apache-2.0
+import warnings
+from pydantic.warnings import UnsupportedFieldAttributeWarning
+
+warnings.filterwarnings('ignore', category=UnsupportedFieldAttributeWarning)
+warnings.filterwarnings('ignore', message="Can't initialize NVML")
 
 import asyncio
 import llama_index.core.async_utils
@@ -35,13 +38,15 @@ try:
 except RuntimeError as e:
     pass  
 
-from .tenant_id import TenantId, DEFAULT_TENANT_ID, TenantIdType, to_tenant_id
+from .tenant_id import TenantId, DEFAULT_TENANT_ID, DEFAULT_TENANT_NAME, TenantIdType, to_tenant_id
 from .config import GraphRAGConfig as GraphRAGConfig, LLMType, EmbeddingType
 from .errors import ModelError, BatchJobError, IndexError, GraphQueryError
 from .logging import set_logging_config, set_advanced_logging_config
 from .lexical_graph_query_engine import LexicalGraphQueryEngine
 from .lexical_graph_index import LexicalGraphIndex
 from .lexical_graph_index import ExtractionConfig, BuildConfig, IndexingConfig
+from .metadata import to_metadata_filter
+from .versioning import add_versioning_info, VersioningConfig
 from . import utils
 from . import indexing
 from . import retrieval

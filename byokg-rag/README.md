@@ -6,43 +6,36 @@ BYOKG-RAG is a novel approach to Knowledge Graph Question Answering (KGQA) that 
 
 ## Key Features 🔑
 
-- **Multi-strategy Retrieval**: Combines multiple retrieval strategies:
-  - Agentic retrieval for dynamic graph exploration
-  - Scoring-based retrieval for relevance ranking
-  - Path-based retrieval for multi-hop reasoning
-  - Query-based retrieval for direct graph queries
+- **Multi-strategy Retrieval**: Combines multiple retrieval strategies through iterative processing:
+  - **Agentic triplet retrieval** for LLM-guided dynamic graph exploration
+  - **Scoring-based triplet retrieval** for semantic-based triplet retrieval
+  - **Path-based retrieval** for multi-hop reasoning through entity paths
+  - **Query-based retrieval** for direct Cypher graph queries
+- **Iterative Processing**: Uses iterative approach combining multi-strategy and Cypher-based retrieval
 - **LLM-powered Reasoning**: Leverages state-of-the-art LLMs for question understanding and answer generation
 
 ## System Components ⚙️
 
-1. **Graph Store** ([src/graphrag_toolkit/byokg_rag/graphstore](src/graphrag_toolkit/byokg_rag/graphstore))
-   - Manages the knowledge graph data structure
+1. **ByoKGQueryEngine** ([src/graphrag_toolkit/byokg_rag/byokg_query_engine.py](src/graphrag_toolkit/byokg_rag/byokg_query_engine.py))
+   - Core orchestrating component with dual-mode processing
+   - Implements iterative retrieval with configurable iterations
+   - Combines multi-strategy and Cypher-based approaches
+
+2. **KG Linkers** ([src/graphrag_toolkit/byokg_rag/graph_connectors](src/graphrag_toolkit/byokg_rag/graph_connectors))
+   - **KGLinker**: Base class for LLM-guided graph operations
+   - **CypherKGLinker**: Specialized for Cypher query generation and execution
+   - Links natural language queries to graph entities and relationships
+
+3. **Graph Retrievers** ([src/graphrag_toolkit/byokg_rag/graph_retrievers](src/graphrag_toolkit/byokg_rag/graph_retrievers))
+   - **AgenticRetriever**: LLM-guided iterative exploration with entity linking
+   - **PathRetriever**: Multi-hop reasoning through entity relationship paths
+   - **GraphQueryRetriever**: Direct Cypher query execution and result processing
+   - **Rerankers**: BGE-based semantic reranking for improving retrieval relevance
+
+4. **Graph Store** ([src/graphrag_toolkit/byokg_rag/graphstore](src/graphrag_toolkit/byokg_rag/graphstore))
+   - Manages knowledge graph data structure and connectivity
    - Provides interfaces for graph traversal and querying
-
-2. **KG Linker** ([src/graphrag_toolkit/byokg_rag/graph_connectors](src/graphrag_toolkit/byokg_rag/graph_connectors))
-   - Links natural language queries to graph entities and paths
-   - Uses LLMs to understand question intent
-   - Extracts relevant entities and relationship patterns
-
-3. **Entity Linker** ([src/graphrag_toolkit/byokg_rag/graph_retrievers](src/graphrag_toolkit/byokg_rag/graph_retrievers))
-   - Matches entities from text to graph nodes
-   - Handles variations in entity names
-   - Uses fuzzy string matching for robust entity resolution
-
-4. **Triplet Retriever** ([src/graphrag_toolkit/byokg_rag/graph_retrievers](src/graphrag_toolkit/byokg_rag/graph_retrievers))
-   - Retrieves relevant triplets from the graph
-   - Navigates the graph starting from linked entities
-   - Verbalizes triplets in natural language format
-
-5. **Path Retriever** ([src/graphrag_toolkit/byokg_rag/graph_retrievers](src/graphrag_toolkit/byokg_rag/graph_retrievers))
-   - Finds paths between entities in the graph
-   - Follows metapath patterns for structured traversal
-   - Connects entities through intermediate nodes
-
-6. **Query Engine** ([src/graphrag_toolkit/byokg_rag/byokg_query_engine.py](src/graphrag_toolkit/byokg_rag/byokg_query_engine.py))
-   - Orchestrates all components
-   - Processes natural language questions
-   - Generates answers based on retrieved information
+   - Supports multiple graph database backends
 
 ## Performance 📈
 
@@ -53,7 +46,7 @@ Our results show that BYOKG-RAG outperforms existing approaches across multiple 
 | Agent        | 77.8    | 57.3    | 59.2   |
 | BYOKG-RAG    | 80.1    | 65.5    | 65.0   |
 
-*Note: Full paper with detailed methodology and results coming soon!* 📄
+*See our [paper](https://arxiv.org/abs/2507.04127) for detailed methodology and results!* 📄
 
 ## Getting Started 🚀
 
@@ -65,25 +58,28 @@ pip install .
 ```
 or 
 ```
-pip install https://github.com/awslabs/graphrag-toolkit/archive/refs/tags/v3.12.0.zip#subdirectory=byokg-rag
+pip install https://github.com/awslabs/graphrag-toolkit/archive/refs/tags/v3.14.0.zip#subdirectory=byokg-rag
 ```
 (The version number will vary based on the latest GitHub release)
 
-2. Run the demo notebook ([byokg_rag_demo.ipynb](../examples/byokg-rag/byokg_rag_demo.ipynb)):
-```
-graphrag-toolkit/examples/byokg-rag/byokg_rag_demo.ipynb
-```
+2. Run the demo notebooks:
+   - [Local Graph Demo](../examples/byokg-rag/byokg_rag_demo_local_graph.ipynb)
+   - [Neptune Analytics Demo](../examples/byokg-rag/byokg_rag_neptune_analytics_demo.ipynb)
+   - [Neptune Analytics with Cypher](../examples/byokg-rag/byokg_rag_neptune_analytics_demo_cypher.ipynb)
+   - [Neptune Database Demo](../examples/byokg-rag/byokg_rag_neptune_db_cluster_demo.ipynb)
 
 ## Citation 📚
 
-*Arxiv paper and citation coming soon!*
+If you use BYOKG-RAG in your research, please cite our paper (to appear in EMNLP Main 2025):
+
+**Paper**: [BYOKG-RAG: Multi-Strategy Graph Retrieval for Knowledge Graph Question Answering](https://arxiv.org/abs/2507.04127)
 
 ```
-@misc{byokg-rag-2025,
-  author = {Mavromatis, Costas and Adeshina, Soji and Ioannidis, Vassilis N. and Han, Zhen and Zhu, Qi and Robinson, Ian and Thompson, Bryan and Rangwala, Huzefa and Karypis, George},
-  title = {{BYOKG-RAG}: Multi-Strategy Graph Retrieval for Knowledge Graph Question Answering},
-  url = {https://github.com/awslabs/graphrag-toolkit},
-  year = {2025}
+@article{mavromatis2025byokg,
+  title={BYOKG-RAG: Multi-Strategy Graph Retrieval for Knowledge Graph Question Answering},
+  author={Mavromatis, Costas and Adeshina, Soji and Ioannidis, Vassilis N and Han, Zhen and Zhu, Qi and Robinson, Ian and Thompson, Bryan and Rangwala, Huzefa and Karypis, George},
+  journal={arXiv preprint arXiv:2507.04127},
+  year={2025}
 }
 ```
 

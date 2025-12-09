@@ -13,6 +13,7 @@ from graphrag_toolkit.lexical_graph.storage.vector.vector_store import VectorSto
 from graphrag_toolkit.lexical_graph.storage.vector.dummy_vector_index import DummyVectorIndex
 from graphrag_toolkit.lexical_graph.retrieval.processors import ProcessorBase, ProcessorArgs
 from graphrag_toolkit.lexical_graph.retrieval.retrievers.traversal_based_base_retriever import TraversalBasedBaseRetriever
+from graphrag_toolkit.lexical_graph.retrieval.utils.vector_utils import get_diverse_vss_elements
 
 from llama_index.core.schema import QueryBundle
 
@@ -88,7 +89,15 @@ class EntityNetworkSearch(TraversalBasedBaseRetriever):
         index_name = self.index_name
         id_name = f'{index_name}Id'
 
-        top_k_results = self.vector_store.get_index(index_name).top_k(query_bundle)
+        top_k_results = get_diverse_vss_elements(
+            index_name, 
+            query_bundle, 
+            self.vector_store, 
+            self.args.vss_diversity_factor, 
+            self.args.vss_top_k, 
+            self.filter_config
+        )
+
         node_ids = [result[index_name][id_name] for result in top_k_results]
         
         return node_ids
@@ -103,7 +112,7 @@ class EntityNetworkSearch(TraversalBasedBaseRetriever):
 
             futures = [
                 executor.submit(self._get_node_ids, QueryBundle(query_str=entity_context_str))
-                for entity_context_str in self.entity_contexts.context_strs
+                for entity_context_str in self.entity_contexts.all_context_strs
             ]
             
             executor.shutdown()

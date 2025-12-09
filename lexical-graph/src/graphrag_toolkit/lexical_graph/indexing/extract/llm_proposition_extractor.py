@@ -16,6 +16,7 @@ from llama_index.core.bridge.pydantic import Field
 from llama_index.core.extractors.interface import BaseExtractor
 from llama_index.core.prompts import PromptTemplate
 from llama_index.core.async_utils import run_jobs
+from llama_index.core.schema import NodeRelationship
 
 
 logger = logging.getLogger(__name__)
@@ -154,7 +155,14 @@ class LLMPropositionExtractor(BaseExtractor):
         """
         logger.debug(f'Extracting propositions for node {node.node_id}')
         text = node.metadata.get(self.source_metadata_field, node.text) if self.source_metadata_field else node.text
-        proposition_collection = await self._extract_propositions(text)
+
+        source = node.relationships.get(NodeRelationship.SOURCE, None)
+        if source:
+            source_info = '\n'.join([str(v) for v in source.metadata.values()])
+        else:
+            source_info = ''
+
+        proposition_collection = await self._extract_propositions(text, source_info)
         if logger.isEnabledFor(logging.DEBUG):
             s = f"""====================================
 text: {text}
@@ -167,7 +175,7 @@ propositions: {proposition_collection}
             PROPOSITIONS_KEY: proposition_collection.model_dump()['propositions']
         }
             
-    async def _extract_propositions(self, text):
+    async def _extract_propositions(self, text, source_info):
         """
         Extracts unique propositions from the given text asynchronously.
 
@@ -187,7 +195,9 @@ propositions: {proposition_collection}
         def blocking_llm_call():
             return self.llm.predict(
                 PromptTemplate(template=self.prompt_template),
-                text=text
+                text=text,
+                source_info=source_info,
+                exclude_cache_keys=['source_info']
             )
         
         coro = asyncio.to_thread(blocking_llm_call)

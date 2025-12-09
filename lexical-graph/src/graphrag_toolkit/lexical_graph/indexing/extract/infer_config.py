@@ -5,24 +5,6 @@ from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
 
-class OnExistingClassifications(Enum):
-    """
-    Enumeration to define behaviors for handling existing classifications.
-
-    This class is an Enum used to specify how existing classifications
-    should be handled during operations. It provides three options:
-    merging with existing classifications, replacing them entirely,
-    or retaining the existing classifications without changes.
-
-    Attributes:
-        MERGE_EXISTING: Merges new classifications with the existing ones.
-        REPLACE_EXISTING: Replaces any existing classifications completely.
-        RETAIN_EXISTING: Keeps the existing classifications without changes.
-    """
-    MERGE_EXISTING = 1
-    REPLACE_EXISTING = 2
-    RETAIN_EXISTING = 3
-
 @dataclass
 class InferClassificationsConfig:
     """
@@ -49,5 +31,5 @@ class InferClassificationsConfig:
     num_samples:Optional[int]=5
     num_iterations:Optional[int]=1
     num_classifications:Optional[int]=15
-    on_existing_classifications:Optional[OnExistingClassifications]=OnExistingClassifications.MERGE_EXISTING
     prompt_template:Optional[str]=None
+    replace_default_classifications:Optional[bool]=False

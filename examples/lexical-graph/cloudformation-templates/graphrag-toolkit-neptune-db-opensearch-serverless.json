@@ -13,9 +13,9 @@
 		"NeptuneEngineVersion": {
 			"Description": "Neptune DB engine version",
 			"Type": "String",
-			"Default": "1.4.5.1"
+			"Default": "1.4.6.2"
 		},
-		"DbInstanceType": {
+		"NeptuneDbInstanceType": {
 			"Description": "Neptune DB instance type (use db.serverless to provision a Neptune Serverless cluster)",
 			"Type": "String",
 			"Default": "db.r8g.large",
@@ -23,7 +23,8 @@
 				"db.serverless",
 				"db.r8g.large",
 				"db.r8g.xlarge",
-				"db.r8g.2xlarge"
+				"db.r8g.2xlarge",
+        "db.r8g.4xlarge"
 			],
 			"ConstraintDescription": "Must be a valid Neptune instance type."
 		},
@@ -61,6 +62,8 @@
 			"Default": "ml.m5.xlarge",
 			"AllowedValues": [
 				"ml.m5.xlarge",
+        "ml.m5.2xlarge",
+        "ml.m5.4xlarge",
 				"ml.p3.2xlarge"
 			],
 			"ConstraintDescription": "Must be a valid SageMaker instance type."
@@ -88,7 +91,7 @@
 					},
 					"Parameters": [
 						"NeptuneEngineVersion",
-						"DbInstanceType",
+						"NeptuneDbInstanceType",
 						"MinNCU",
 						"MaxNCU",
 						"EnableAuditLog"
@@ -507,11 +510,11 @@
 							],
 							"Resource": [
 								{
-									"Fn::Sub": "arn:${AWS::Partition}:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-20240620-v1:0"
+									"Fn::Sub": "arn:${AWS::Partition}:bedrock:*::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0"
 								},
 								{
 									"Fn::Sub": [
-										"arn:${partition}:bedrock:${region}:${accountId}:inference-profile/${regionPrefix}.anthropic.claude-3-5-sonnet-20240620-v1:0",
+										"arn:${partition}:bedrock:${region}:${accountId}:inference-profile/${regionPrefix}.anthropic.claude-3-5-haiku-20241022-v1:0",
 										{
 											"partition": {
 												"Ref": "AWS::Partition"
@@ -932,7 +935,7 @@
 					"Ref": "NeptuneDBCluster"
 				},
 				"DBInstanceClass": {
-					"Ref": "DbInstanceType"
+					"Ref": "NeptuneDbInstanceType"
 				},
 				"DBParameterGroupName": {
 					"Ref": "NeptuneDBParameterGroup"
@@ -1219,7 +1222,7 @@
 										"echo \"export EXTRACTION_MODEL=",
 										{
 											"Fn::Sub": [
-												"${regionPrefix}.anthropic.claude-3-5-sonnet-20240620-v1:0",
+												"${regionPrefix}.anthropic.claude-sonnet-4-20250514-v1:0",
 												{
 													"partition": {
 														"Ref": "AWS::Partition"
@@ -1252,7 +1255,7 @@
 										"echo \"export RESPONSE_MODEL=",
 										{
 											"Fn::Sub": [
-												"${regionPrefix}.anthropic.claude-3-5-sonnet-20240620-v1:0",
+												"${regionPrefix}.anthropic.claude-sonnet-4-20250514-v1:0",
 												{
 													"partition": {
 														"Ref": "AWS::Partition"
@@ -1283,7 +1286,7 @@
 										"echo \"export EVALUATION_MODEL=",
 										{
 											"Fn::Sub": [
-												"${regionPrefix}.anthropic.claude-3-5-sonnet-20240620-v1:0",
+												"${regionPrefix}.anthropic.claude-sonnet-4-20250514-v1:0",
 												{
 													"partition": {
 														"Ref": "AWS::Partition"
@@ -1466,7 +1469,7 @@
 										"  echo \"export EXTRACTION_MODEL=",
 										{
 											"Fn::Sub": [
-												"${regionPrefix}.anthropic.claude-3-5-sonnet-20240620-v1:0",
+												"${regionPrefix}.anthropic.claude-sonnet-4-20250514-v1:0",
 												{
 													"partition": {
 														"Ref": "AWS::Partition"
@@ -1499,7 +1502,7 @@
 										"  echo \"export RESPONSE_MODEL=",
 										{
 											"Fn::Sub": [
-												"${regionPrefix}.anthropic.claude-3-5-sonnet-20240620-v1:0",
+												"${regionPrefix}.anthropic.claude-sonnet-4-20250514-v1:0",
 												{
 													"partition": {
 														"Ref": "AWS::Partition"
@@ -1530,7 +1533,7 @@
 										"  echo \"export EVALUATION_MODEL=",
 										{
 											"Fn::Sub": [
-												"${regionPrefix}.anthropic.claude-3-5-sonnet-20240620-v1:0",
+												"${regionPrefix}.anthropic.claude-sonnet-4-20250514-v1:0",
 												{
 													"partition": {
 														"Ref": "AWS::Partition"

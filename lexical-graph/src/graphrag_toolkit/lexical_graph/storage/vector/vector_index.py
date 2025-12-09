@@ -173,3 +173,11 @@ class VectorIndex(BaseModel):
             NotImplementedError: If the method is not implemented.
         """
         raise NotImplementedError
+    
+    @abc.abstractmethod
+    def update_versioning(self, versioning_timestamp:int, ids:List[str]=[]) -> List[str]:
+        raise NotImplementedError
+    
+    @abc.abstractmethod
+    def enable_for_versioning(self, ids:List[str]=[]) -> List[str]:
+        raise NotImplementedError

@@ -18,7 +18,7 @@ from graphrag_toolkit.lexical_graph.indexing.constants import PROPOSITIONS_KEY
 from graphrag_toolkit.lexical_graph.indexing.prompts import EXTRACT_PROPOSITIONS_PROMPT
 from graphrag_toolkit.lexical_graph.indexing.extract.batch_config import BatchConfig
 from graphrag_toolkit.lexical_graph.indexing.extract.llm_proposition_extractor import LLMPropositionExtractor
-from graphrag_toolkit.lexical_graph.indexing.utils.batch_inference_utils import create_inference_inputs, create_inference_inputs_for_messages, create_and_run_batch_job, download_output_files, process_batch_output, split_nodes
+from graphrag_toolkit.lexical_graph.indexing.utils.batch_inference_utils import create_inference_inputs, create_inference_inputs_for_messages, create_and_run_batch_job, download_output_files, process_batch_output, split_nodes, get_request_body
 from graphrag_toolkit.lexical_graph.indexing.utils.batch_inference_utils import get_file_size_mb, get_file_sizes_mb
 from graphrag_toolkit.lexical_graph.indexing.utils.batch_inference_utils import BEDROCK_MIN_BATCH_SIZE
 
@@ -26,6 +26,7 @@ from llama_index.core.extractors.interface import BaseExtractor
 from llama_index.core.bridge.pydantic import Field
 from llama_index.core.schema import TextNode, BaseNode
 from llama_index.core.prompts import PromptTemplate
+from llama_index.core.schema import NodeRelationship
 
 logger = logging.getLogger(__name__)
 
@@ -133,18 +134,6 @@ class BatchLLMPropositionExtractor(BaseExtractor):
             batch_suffix = f'{batch_index}-{uuid.uuid4().hex[:5]}'
             input_filename = f'proposition-extraction-{timestamp}-batch-{batch_suffix}.jsonl'
 
-            messages_batch = []
-            for node in node_batch:
-                text = node.metadata.get(self.source_metadata_field, node.text) if self.source_metadata_field else node.text
-                messages = self.llm.llm._get_messages(PromptTemplate(self.prompt_template), text=text)
-                messages_batch.append(messages)
-
-            json_inputs = create_inference_inputs_for_messages(
-                self.llm.llm, 
-                node_batch, 
-                messages_batch
-            )
-
             root_dir = os.path.join(self.batch_inference_dir, timestamp, batch_suffix)
             input_dir = os.path.join(root_dir, 'inputs')
             output_dir = os.path.join(root_dir, 'outputs')
@@ -153,14 +142,35 @@ class BatchLLMPropositionExtractor(BaseExtractor):
 
             input_filepath = os.path.join(input_dir, input_filename)
 
-            logger.debug(f'[Proposition batch inputs] Writing {len(json_inputs)} records to {input_filename}')
+            logger.debug(f'[Proposition batch inputs] Writing records to {input_filename}')
+
+            llm = self.llm.llm
+
+            inference_parameters = llm._get_all_kwargs() 
+            record_count = 0
 
             with open(input_filepath, 'w') as file:
-                for item in json_inputs:
-                    json.dump(item, file)
+
+                for node in node_batch:
+                    text = node.metadata.get(self.source_metadata_field, node.text) if self.source_metadata_field else node.text
+                    source = node.relationships.get(NodeRelationship.SOURCE, None)
+                    if source:
+                        source_info = '\n'.join([str(v) for v in source.metadata.values()])
+                    else:
+                        source_info = ''
+                    
+                    messages = llm._get_messages(PromptTemplate(self.prompt_template), text=text, source_info=source_info)
+                    json_structure = {
+                        'recordId': node.node_id,
+                        'modelInput': get_request_body(llm, messages, inference_parameters)
+                    }
+
+                    json.dump(json_structure, file)
                     file.write('\n')
 
-            logger.debug(f'[Proposition batch inputs] Batch input file ready [file: {input_filepath} ({get_file_size_mb(input_filepath)} MB)]')
+                    record_count += 1
+
+            logger.debug(f'[Proposition batch inputs] Batch input file ready [num_records: {record_count}, file: {input_filepath} ({get_file_size_mb(input_filepath)} MB)]')
 
             # 2 - Upload records to s3
             if self.batch_config.key_prefix:

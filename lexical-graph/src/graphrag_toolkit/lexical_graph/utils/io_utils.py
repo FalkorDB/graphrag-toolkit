@@ -47,7 +47,7 @@ def write_json(path, j):
     """
     os.makedirs(os.path.dirname(os.path.realpath(path)), exist_ok=True)
     with open(path, 'w') as f:
-        json.dump(j, f, ensure_ascii=False)
+        json.dump(j, f, ensure_ascii=False, indent=2)
 
 def read_json(path):
     """

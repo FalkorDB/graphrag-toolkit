@@ -7,9 +7,10 @@ import uuid
 from dataclasses import dataclass
 from tenacity import Retrying, stop_after_attempt, wait_random
 from tenacity import RetryCallState
-from typing import Callable, List, Dict, Any, Optional
+from typing import Callable, List, Dict, Any, Optional, Union
 
 from graphrag_toolkit.lexical_graph import TenantId, GraphQueryError
+from graphrag_toolkit.lexical_graph.storage.graph.query_tree import QueryTree
 
 from llama_index.core.bridge.pydantic import BaseModel, Field
 
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 REDACTED = '**REDACTED**'
 NUM_CHARS_IN_DEBUG_RESULTS = 256
+
+QUERY_TYPE = Union[str, QueryTree]
 
 def get_log_formatting(args):
     """
@@ -136,7 +139,7 @@ class GraphQueryLogFormatting(BaseModel):
         None
     """
     @abc.abstractmethod
-    def format_log_entry(self, query_ref:str, query:str, parameters:Dict[str,Any]={}, results:Optional[List[Any]]=None) -> GraphQueryLogEntryParameters:
+    def format_log_entry(self, query_ref:str, query:QUERY_TYPE, parameters:Dict[str,Any]={}, results:Optional[List[Any]]=None) -> GraphQueryLogEntryParameters:
         """
         Formats a log entry for a graph query execution.
 
@@ -165,7 +168,7 @@ class GraphQueryLogFormatting(BaseModel):
         raise NotImplementedError
     
 class RedactedGraphQueryLogFormatting(GraphQueryLogFormatting):
-    def format_log_entry(self, query_ref:str, query:str, parameters:Dict[str,Any]={}, results:Optional[List[Any]]=None) -> GraphQueryLogEntryParameters:
+    def format_log_entry(self, query_ref:str, query:QUERY_TYPE, parameters:Dict[str,Any]={}, results:Optional[List[Any]]=None) -> GraphQueryLogEntryParameters:
         """
         Formats and creates a new `GraphQueryLogEntryParameters` instance with
         the given query reference, query, parameters, and results, while redacting
@@ -183,18 +186,23 @@ class RedactedGraphQueryLogFormatting(GraphQueryLogFormatting):
             GraphQueryLogEntryParameters: An instance containing the formatted and
             redacted log entry details.
         """
+        query = query.root_query.query if isinstance(query, QueryTree) else query
         lines = [l.strip() for l in query.split('\n')]
         redacted_query = '\n'.join(line for line in lines if line.startswith('//')) 
+        query_str = redacted_query or REDACTED
+
         parameters_str = REDACTED
         if parameters and 'params' in parameters and isinstance(parameters['params'], list):
             parameters_str = f" -- {len(parameters['params'])} parameter set(s) -- "
+
         results_str = ' -- Empty -- '
         if results and isinstance(results, list):
             results_str = f' -- {len(results)} result(s) -- '
-        return GraphQueryLogEntryParameters(query_ref=query_ref, query=redacted_query or REDACTED, parameters=parameters_str, results=results_str)
+
+        return GraphQueryLogEntryParameters(query_ref=query_ref, query=query_str, parameters=parameters_str, results=results_str)
 
 class NonRedactedGraphQueryLogFormatting(GraphQueryLogFormatting):
-    def format_log_entry(self, query_ref:str, query:str, parameters:Dict[str,Any]={}, results:Optional[List[Any]]=None) -> GraphQueryLogEntryParameters:
+    def format_log_entry(self, query_ref:str, query:QUERY_TYPE, parameters:Dict[str,Any]={}, results:Optional[List[Any]]=None) -> GraphQueryLogEntryParameters:
         """
         Formats a log entry for a graph query execution, including the query reference,
         query string, parameters used, and the results. Truncates the results string if
@@ -212,6 +220,7 @@ class NonRedactedGraphQueryLogFormatting(GraphQueryLogFormatting):
             GraphQueryLogEntryParameters: A dataclass representing the formatted log entry
                 with the provided query details and truncated results if applicable.
         """
+        query = query.root_query.query if isinstance(query, QueryTree) else query
         results_str = str(results)
         if len(results_str) > NUM_CHARS_IN_DEBUG_RESULTS:
             results_str = f'{results_str[:NUM_CHARS_IN_DEBUG_RESULTS]}... <{len(results_str) - NUM_CHARS_IN_DEBUG_RESULTS} more chars>'
@@ -421,7 +430,12 @@ class GraphStore(BaseModel):
                 with attempt:
                     attempt_number += 1
                     attempt.retry_state.attempt_number
-                    return self._execute_query(query, parameters, **kwargs)
+                    if isinstance(query, str):
+                        return self._execute_query(query, parameters, **kwargs)
+                    elif isinstance(query, QueryTree):
+                        return query.run(parameters, self.execute_query_with_retry)
+                    else:
+                        raise ValueError(f'Invalid query type. Expected string or Query Tree but received {type(query).__name__}.')
             
         except Exception as e:
             raise GraphQueryError(f'{str(e)} [query_ref: {log_entry_parameters.query_ref}, query: {log_entry_parameters.query}, parameters: {log_entry_parameters.parameters}]')
@@ -478,10 +492,10 @@ class GraphStore(BaseModel):
         """
         return lambda x: x
     
-    def execute_query(self, cypher, parameters={}, correlation_id=None) -> Dict[str, Any]:
+    def execute_query(self, query:QUERY_TYPE, parameters={}, correlation_id:Optional[str]=None) -> List[Any]:
         if correlation_id:
             return self.execute_query_with_retry(
-                query=cypher, 
+                query=query, 
                 parameters=parameters,
                 max_attempts=1, 
                 max_wait=0, 
@@ -489,7 +503,7 @@ class GraphStore(BaseModel):
             )
         else:
             return self.execute_query_with_retry(
-                query=cypher, 
+                query=query, 
                 parameters=parameters,
                 max_attempts=1, 
                 max_wait=0
@@ -497,7 +511,7 @@ class GraphStore(BaseModel):
 
     
     @abc.abstractmethod
-    def _execute_query(self, cypher, parameters={}, correlation_id=None) -> Dict[str, Any]:
+    def _execute_query(self, cypher, parameters={}, correlation_id=None) -> List[Any]:
         """
         Executes a Cypher query on a connected database and returns the result as a dictionary.
 

@@ -25,7 +25,7 @@ def score_values_with_tfidf(values:List[str],
         max_num_values_to_score =  len(values_to_score)
         
         def calculate_ranked_score(row_index, score):
-            multiplier = 1.0 if row_index < num_primary_match_values else 0.7
+            multiplier = 1.0 if row_index < num_primary_match_values else 0.9
             return score * multiplier
         
         if limit:

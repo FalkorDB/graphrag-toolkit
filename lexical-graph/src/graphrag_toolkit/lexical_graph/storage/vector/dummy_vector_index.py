@@ -73,7 +73,6 @@ class DummyVectorIndex(VectorIndex):
         Args:
             nodes (list): A list of node objects for which embeddings are to be added.
         """ 
-        logger.debug(f'[{self.index_name}] add embeddings for nodes: {[n.id_ for n in nodes]}')
         return nodes
     
     def top_k(self, query_bundle:QueryBundle, top_k:int=5, filter_config:Optional[FilterConfig]=None) -> Sequence[Any]:
@@ -113,4 +112,10 @@ class DummyVectorIndex(VectorIndex):
             document IDs.
         """
         logger.debug(f'[{self.index_name}] get embeddings for ids: {ids}')
+        return []
+    
+    def update_versioning(self, versioning_timestamp:int, ids:List[str]=[]):
+        return []
+    
+    def enable_for_versioning(self, ids:List[str]=[]):
         return []

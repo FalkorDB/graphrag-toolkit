@@ -29,10 +29,11 @@ LLMType = Union[LLM, str]
 EmbeddingType = Union[BaseEmbedding, str]
 logger = logging.getLogger(__name__)
 
-DEFAULT_EXTRACTION_MODEL = 'us.anthropic.claude-3-5-sonnet-20240620-v1:0'
-DEFAULT_RESPONSE_MODEL = 'us.anthropic.claude-3-5-sonnet-20240620-v1:0'
+DEFAULT_EXTRACTION_MODEL = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0'
+DEFAULT_RESPONSE_MODEL = 'us.anthropic.claude-3-7-sonnet-20250219-v1:0'
 DEFAULT_EMBEDDINGS_MODEL = 'cohere.embed-english-v3'
 DEFAULT_RERANKING_MODEL = 'mixedbread-ai/mxbai-rerank-xsmall-v1'
+DEFAULT_BEDROCK_RERANKING_MODEL = 'cohere.rerank-v3-5:0'
 DEFAULT_EMBEDDINGS_DIMENSIONS = 1024
 DEFAULT_EXTRACTION_NUM_WORKERS = 2
 DEFAULT_EXTRACTION_BATCH_SIZE = 4
@@ -43,8 +44,11 @@ DEFAULT_BUILD_BATCH_WRITE_SIZE = 25
 DEFAULT_BATCH_WRITES_ENABLED = True
 DEFAULT_INCLUDE_DOMAIN_LABELS = False
 DEFAULT_INCLUDE_LOCAL_ENTITIES = False
+DEFAULT_INCLUDE_CLASSIFICATION_IN_ENTITY_ID = True
 DEFAULT_ENABLE_CACHE = False
 DEFAULT_METADATA_DATETIME_SUFFIXES = ['_date', '_datetime']
+DEFAULT_OPENSEARCH_ENGINE = 'nmslib'
+DEFAULT_ENABLE_VERSIONING = False
 
 def _is_json_string(s):
     """
@@ -268,6 +272,7 @@ class _GraphRAGConfig:
     _embed_model: Optional[BaseEmbedding] = None
     _embed_dimensions: Optional[int] = None
     _reranking_model: Optional[str] = None
+    _bedrock_reranking_model: Optional[str] = None
     _extraction_num_workers: Optional[int] = None
     _extraction_num_threads_per_worker: Optional[int] = None
     _extraction_batch_size: Optional[int] = None
@@ -277,8 +282,11 @@ class _GraphRAGConfig:
     _batch_writes_enabled: Optional[bool] = None
     _include_domain_labels: Optional[bool] = None
     _include_local_entities: Optional[bool] = None
+    _include_classification_in_entity_id: Optional[bool] = None
     _enable_cache: Optional[bool] = None
     _metadata_datetime_suffixes: Optional[List[str]] = None
+    _opensearch_engine: Optional[str] = None
+    _enable_versioning = None
 
     @contextlib.contextmanager
     def _validate_sso_token(self, profile):
@@ -761,6 +769,16 @@ class _GraphRAGConfig:
         self._include_local_entities = include_local_entities
 
     @property
+    def include_classification_in_entity_id(self) -> bool:   
+        if self._include_classification_in_entity_id is None:
+            self.include_classification_in_entity_id = string_to_bool(os.environ.get('INCLUDE_CLASSIFICATION_IN_ENTITY_ID'), DEFAULT_INCLUDE_CLASSIFICATION_IN_ENTITY_ID)
+        return self._include_classification_in_entity_id
+
+    @include_classification_in_entity_id.setter
+    def include_classification_in_entity_id(self, include_classification_in_entity_id: bool) -> None:
+        self._include_classification_in_entity_id = include_classification_in_entity_id
+
+    @property
     def enable_cache(self) -> bool:
         """
         Indicates whether the caching mechanism is enabled for the application. This
@@ -1115,6 +1133,39 @@ class _GraphRAGConfig:
             reranking_model (str): The name or identifier for the reranking model to be used.
         """
         self._reranking_model = reranking_model
+
+    @property
+    def bedrock_reranking_model(self) -> str:
+       
+        if self._bedrock_reranking_model is None:
+            self._bedrock_reranking_model = os.environ.get('BEDROCK_RERANKING_MODEL', DEFAULT_BEDROCK_RERANKING_MODEL)
+
+        return self._bedrock_reranking_model
+
+    @bedrock_reranking_model.setter
+    def bedrock_reranking_model(self, bedrock_reranking_model: str) -> None:
+        self._bedrock_reranking_model = bedrock_reranking_model
+
+    @property
+    def opensearch_engine(self) -> str:
+        if self._opensearch_engine is None:
+            self._opensearch_engine = os.environ.get('OPENSEARCH_ENGINE', DEFAULT_OPENSEARCH_ENGINE)
+
+        return self._opensearch_engine
+
+    @opensearch_engine.setter
+    def opensearch_engine(self, opensearch_engine: str) -> None:
+        self._opensearch_engine = opensearch_engine
+
+    @property
+    def enable_versioning(self) -> bool:
+        if self._enable_versioning is None:
+            self._enable_versioning = string_to_bool(os.environ.get('ENABLE_VERSIONING'), DEFAULT_ENABLE_VERSIONING)
+        return self._enable_versioning
+
+    @enable_versioning.setter
+    def enable_versioning(self, enable_versioning: bool) -> None:
+        self._enable_versioning = enable_versioning
 
 
 GraphRAGConfig = _GraphRAGConfig()

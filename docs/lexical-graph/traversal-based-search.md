@@ -53,7 +53,7 @@ with (
 print(response.print_response_stream())
 ```
 
-The parameters used to configure traversal-based search are described in [Configuring and Tuning Traversal-Based Search](./configuring-and-tuning-traversal-based-search.md).
+The parameters used to configure traversal-based search are described in [Traversal-Based Search Configuration](./traversal-based-search-configuration.md).
 
 ### Basic concepts
 

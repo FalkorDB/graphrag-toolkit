@@ -2,36 +2,39 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
-
-from typing import List, Optional, Union, Any
+from typing import List, Optional, Union, Any, Dict, overload
 from pipe import Pipe
 
+from graphrag_toolkit.lexical_graph import GraphRAGConfig
 from graphrag_toolkit.lexical_graph.tenant_id import TenantId, TenantIdType, DEFAULT_TENANT_ID, to_tenant_id
 from graphrag_toolkit.lexical_graph.metadata import FilterConfig, SourceMetadataFormatter, DefaultSourceMetadataFormatter, MetadataFiltersType
+from graphrag_toolkit.lexical_graph.metadata import to_metadata_filter
+from graphrag_toolkit.lexical_graph.versioning import VALID_FROM, VALID_TO, EXTRACT_TIMESTAMP, BUILD_TIMESTAMP, VERSIONING_METADATA_KEYS, VERSION_INDEPENDENT_ID_FIELDS, TIMESTAMP_UPPER_BOUND, TIMESTAMP_LOWER_BOUND
 from graphrag_toolkit.lexical_graph.storage import GraphStoreFactory, GraphStoreType
 from graphrag_toolkit.lexical_graph.storage import VectorStoreFactory, VectorStoreType
 from graphrag_toolkit.lexical_graph.storage.graph import MultiTenantGraphStore
 from graphrag_toolkit.lexical_graph.storage.graph import DummyGraphStore
+from graphrag_toolkit.lexical_graph.storage.graph.graph_utils import filter_config_to_opencypher_filters
 from graphrag_toolkit.lexical_graph.storage.vector import MultiTenantVectorStore
 from graphrag_toolkit.lexical_graph.indexing.extract import BatchConfig
 from graphrag_toolkit.lexical_graph.indexing import NodeHandler
 from graphrag_toolkit.lexical_graph.indexing import sink
 from graphrag_toolkit.lexical_graph.indexing.constants import PROPOSITIONS_KEY, DEFAULT_ENTITY_CLASSIFICATIONS
-from graphrag_toolkit.lexical_graph.indexing.extract import ScopedValueProvider, FixedScopedValueProvider, DEFAULT_SCOPE
-from graphrag_toolkit.lexical_graph.indexing.extract import GraphScopedValueStore, InMemoryScopedValueStore
-from graphrag_toolkit.lexical_graph.indexing.extract import LLMPropositionExtractor, BatchLLMPropositionExtractor
-from graphrag_toolkit.lexical_graph.indexing.extract import TopicExtractor, BatchTopicExtractor
+from graphrag_toolkit.lexical_graph.indexing.extract import PREFERRED_VALUES_PROVIDER_TYPE, default_preferred_values
+from graphrag_toolkit.lexical_graph.indexing.extract import LLMPropositionExtractor, BatchLLMPropositionExtractorSync
+from graphrag_toolkit.lexical_graph.indexing.extract import TopicExtractor, BatchTopicExtractorSync
 from graphrag_toolkit.lexical_graph.indexing.extract import ExtractionPipeline
 from graphrag_toolkit.lexical_graph.indexing.extract import InferClassifications, InferClassificationsConfig
 from graphrag_toolkit.lexical_graph.indexing.build import BuildPipeline
 from graphrag_toolkit.lexical_graph.indexing.build import VectorIndexing
 from graphrag_toolkit.lexical_graph.indexing.build import GraphConstruction
+from graphrag_toolkit.lexical_graph.indexing.build import VersionManager
 from graphrag_toolkit.lexical_graph.indexing.build import Checkpoint
 from graphrag_toolkit.lexical_graph.indexing.build import BuildFilters
 from graphrag_toolkit.lexical_graph.indexing.build.null_builder import NullBuilder
 
 from llama_index.core.node_parser import SentenceSplitter, NodeParser
-from llama_index.core.schema import BaseNode, NodeRelationship
+from llama_index.core.schema import BaseNode
 
 DEFAULT_EXTRACTION_DIR = 'output'
 
@@ -66,13 +69,15 @@ class ExtractionConfig():
     """
     def __init__(self,
                  enable_proposition_extraction: bool = True,
-                 preferred_entity_classifications: List[str] = DEFAULT_ENTITY_CLASSIFICATIONS,
+                 preferred_entity_classifications: PREFERRED_VALUES_PROVIDER_TYPE = DEFAULT_ENTITY_CLASSIFICATIONS,
+                 preferred_topics: PREFERRED_VALUES_PROVIDER_TYPE = None,
                  infer_entity_classifications: Union[InferClassificationsConfig, bool] = False,
                  extract_propositions_prompt_template: Optional[str] = None,
                  extract_topics_prompt_template: Optional[str] = None,
                  extraction_filters: Optional[MetadataFiltersType] = None):
         self.enable_proposition_extraction = enable_proposition_extraction
         self.preferred_entity_classifications = preferred_entity_classifications if preferred_entity_classifications is not None else []
+        self.preferred_topics = preferred_topics if preferred_topics is not None else []
         self.infer_entity_classifications = infer_entity_classifications
         self.extract_propositions_prompt_template = extract_propositions_prompt_template
         self.extract_topics_prompt_template = extract_topics_prompt_template
@@ -100,7 +105,8 @@ class BuildConfig():
                  build_filters: Optional[BuildFilters] = None,
                  include_domain_labels: Optional[bool] = None,
                  include_local_entities: Optional[bool] = None,
-                 source_metadata_formatter: Optional[SourceMetadataFormatter] = None):
+                 source_metadata_formatter: Optional[SourceMetadataFormatter] = None,
+                 enable_versioning: Optional[bool] = None):
         """
         Initializes an instance of the class. This constructor allows for the optional
         configuration of filters, domain label inclusion, and a metadata formatter.
@@ -121,6 +127,7 @@ class BuildConfig():
         self.include_domain_labels = include_domain_labels
         self.include_local_entities = include_local_entities
         self.source_metadata_formatter = source_metadata_formatter or DefaultSourceMetadataFormatter()
+        self.enable_versioning = enable_versioning
 
 
 class IndexingConfig():
@@ -167,7 +174,7 @@ class IndexingConfig():
                 operations. If None, batch inference is not used.
         """
         if chunking is not None and len(chunking) == 0:
-            chunking.append(SentenceSplitter(chunk_size=256, chunk_overlap=20))
+            chunking.append(SentenceSplitter(chunk_size=256, chunk_overlap=25))
 
         self.chunking = chunking  # None = no chunking
         self.extraction = extraction or ExtractionConfig()
@@ -175,29 +182,6 @@ class IndexingConfig():
         self.batch_config = batch_config  # None = do not use batch inference
 
 IndexingConfigType = Union[IndexingConfig, ExtractionConfig, BuildConfig, BatchConfig, List[NodeParser]]
-
-def get_topic_scope(node: BaseNode):
-    """
-    Retrieves the topic scope for a given node.
-
-    This function determines the topic scope of the provided node by examining
-    its SOURCE relationship. If the SOURCE relationship does not exist, it
-    returns a default scope constant. Otherwise, it retrieves the node ID from
-    the SOURCE relationship.
-
-    Args:
-        node (BaseNode): The node for which the topic scope is determined.
-
-    Returns:
-        str: The determined topic scope of the node. If no SOURCE relationship
-        exists, returns a default scope.
-    """
-    source = node.relationships.get(NodeRelationship.SOURCE, None)
-    if not source:
-        return DEFAULT_SCOPE
-    else:
-        return source.node_id
-    
 
 def to_indexing_config(indexing_config:Optional[IndexingConfigType]=None) -> IndexingConfig:
     if not indexing_config:
@@ -217,10 +201,6 @@ def to_indexing_config(indexing_config:Optional[IndexingConfigType]=None) -> Ind
         return IndexingConfig(chunking=indexing_config)
     else:
         raise ValueError(f'Invalid indexing config type: {type(indexing_config)}')
-
-
-
-
 
 def to_indexing_config(indexing_config: Optional[IndexingConfigType] = None) -> IndexingConfig:
     """
@@ -306,7 +286,7 @@ class LexicalGraphIndex():
     ):
         from llama_index.core.utils import globals_helper
         globals_helper.stopwords
-        
+
         tenant_id = to_tenant_id(tenant_id)
 
         self.graph_store = MultiTenantGraphStore.wrap(GraphStoreFactory.for_graph_store(graph_store), tenant_id)
@@ -361,7 +341,7 @@ class LexicalGraphIndex():
 
         if config.extraction.enable_proposition_extraction:
             if config.batch_config:
-                components.append(BatchLLMPropositionExtractor(
+                components.append(BatchLLMPropositionExtractorSync(
                     batch_config=config.batch_config,
                     prompt_template=config.extraction.extract_propositions_prompt_template
                 ))
@@ -370,67 +350,52 @@ class LexicalGraphIndex():
                     prompt_template=config.extraction.extract_propositions_prompt_template
                 ))
 
-        entity_classification_value_store = InMemoryScopedValueStore()
         entity_classification_provider = None
         topic_provider = None
-        
-        classification_label = 'EntityClassification'
-        classification_scope = DEFAULT_SCOPE
 
         if isinstance(self.graph_store, DummyGraphStore):
-            entity_classification_provider = FixedScopedValueProvider(
-                scoped_values={
-                    DEFAULT_SCOPE: config.extraction.preferred_entity_classifications
-                }
-            )
-            topic_provider = FixedScopedValueProvider(
-                scoped_values={
-                    DEFAULT_SCOPE: []
-                }
-            )
+            entity_classification_provider = default_preferred_values([])
+            topic_provider = default_preferred_values([])
         else:
 
-            entity_classification_value_store.save_scoped_values(
-                classification_label, 
-                classification_scope, 
-                config.extraction.preferred_entity_classifications
-            )
+            if config.extraction.infer_entity_classifications:
 
-            entity_classification_provider = ScopedValueProvider(
-                label=classification_label,
-                scoped_value_store=entity_classification_value_store
-            )
-            
-            topic_provider = ScopedValueProvider(
-                label='StatementTopic',
-                scoped_value_store=GraphScopedValueStore(graph_store=self.graph_store),
-                scope_func=get_topic_scope
-            )
+                if isinstance(config.extraction.infer_entity_classifications, InferClassificationsConfig):
+                    infer_config = config.extraction.infer_entity_classifications 
+                else:
+                    infer_config = InferClassificationsConfig()
 
-        if config.extraction.infer_entity_classifications:
-            if isinstance(config.extraction.infer_entity_classifications, InferClassificationsConfig):
-                infer_config = config.extraction.infer_entity_classifications 
-            else:
-                infer_config = InferClassificationsConfig()
+                default_classifications = []
 
-            pre_processors.append(InferClassifications(
-                    classification_label=classification_label,
-                    classification_scope=classification_scope,
-                    classification_store=entity_classification_value_store,
+                if isinstance(config.extraction.preferred_entity_classifications, list):
+                    default_classifications = config.extraction.preferred_entity_classifications
+
+                entity_classification_provider = InferClassifications(
                     splitter=SentenceSplitter(chunk_size=256, chunk_overlap=20) if config.chunking else None,
-                    default_classifications=config.extraction.preferred_entity_classifications,
+                    default_classifications=default_classifications,
                     num_samples=infer_config.num_samples,
                     num_iterations=infer_config.num_iterations,
                     num_classifications=infer_config.num_classifications,
-                    merge_action=infer_config.on_existing_classifications,
-                    prompt_template=infer_config.prompt_template
+                    prompt_template=infer_config.prompt_template,
+                    replace_default_classifications=infer_config.replace_default_classifications
                 )
-            )
+
+                pre_processors.append(entity_classification_provider)
+
+            elif isinstance(config.extraction.preferred_entity_classifications, list):
+                entity_classification_provider = default_preferred_values(config.extraction.preferred_entity_classifications)
+            else:
+                entity_classification_provider = config.extraction.preferred_entity_classifications
+
+            if isinstance(config.extraction.preferred_topics, list):
+                topic_provider = default_preferred_values(config.extraction.preferred_topics)
+            else:
+                topic_provider = config.extraction.preferred_topics
 
         topic_extractor = None
 
         if config.batch_config:
-            topic_extractor = BatchTopicExtractor(
+            topic_extractor = BatchTopicExtractorSync(
                 batch_config=config.batch_config,
                 source_metadata_field=PROPOSITIONS_KEY if config.extraction.enable_proposition_extraction else None,
                 entity_classification_provider=entity_classification_provider,
@@ -490,6 +455,7 @@ class LexicalGraphIndex():
             components=[
                 NullBuilder()
             ],
+            builders=[],
             show_progress=show_progress,
             checkpoint=checkpoint,
             num_workers=1,
@@ -532,11 +498,20 @@ class LexicalGraphIndex():
 
         build_config = self.indexing_config.build
 
+        enable_versioning =  kwargs.get('enable_versioning', None) or build_config.enable_versioning or GraphRAGConfig.enable_versioning
+
+        components = []
+
+        if enable_versioning:
+            components.append(VersionManager.for_graph_and_vector_store(self.graph_store, self.vector_store))
+
+        components.extend([
+            GraphConstruction.for_graph_store(self.graph_store),
+            VectorIndexing.for_vector_store(self.vector_store)
+        ])
+
         build_pipeline = BuildPipeline.create(
-            components=[
-                GraphConstruction.for_graph_store(self.graph_store),
-                VectorIndexing.for_vector_store(self.vector_store)
-            ],
+            components=components,
             show_progress=show_progress,
             checkpoint=checkpoint,
             build_filters=build_config.build_filters,
@@ -586,20 +561,99 @@ class LexicalGraphIndex():
         )
 
         build_config = self.indexing_config.build
+
+        enable_versioning =  kwargs.get('enable_versioning', None) or build_config.enable_versioning or GraphRAGConfig.enable_versioning
+
+        build_components = []
+
+        if enable_versioning:
+            build_components.append(VersionManager.for_graph_and_vector_store(self.graph_store, self.vector_store))
+
+        build_components.extend([
+            GraphConstruction.for_graph_store(self.graph_store),
+            VectorIndexing.for_vector_store(self.vector_store)
+        ])
         
         build_pipeline = BuildPipeline.create(
-            components=[
-                GraphConstruction.for_graph_store(self.graph_store),
-                VectorIndexing.for_vector_store(self.vector_store)
-            ],
+            components=build_components,
             show_progress=show_progress,
             checkpoint=checkpoint,
             build_filters=build_config.build_filters,
             source_metadata_formatter=build_config.source_metadata_formatter,
             include_domain_labels=build_config.include_domain_labels,
+            include_local_entities=build_config.include_local_entities,
             tenant_id=self.tenant_id,
             **kwargs
         )
 
         sink_fn = sink if not handler else Pipe(handler)
         nodes | extraction_pipeline | build_pipeline | sink_fn
+
+    @overload
+    def get_sources(self, source_id:str=None, order_by:str=None) -> Dict[str, Any]:
+        ...
+    
+    @overload
+    def get_sources(self, source_ids:List[str]=[]) -> Dict[str, Any]:
+        ...
+
+    @overload
+    def get_sources(self, filter:FilterConfig=None) -> Dict[str, Any]:
+        ...
+
+    @overload
+    def get_sources(self, filter:Dict[str, Any]={}) -> Dict[str, Any]:
+        ...
+
+    @overload
+    def get_sources(self, filter:List[Dict[str, Any]]=[]) -> Dict[str, Any]:
+        ...
+
+    def get_sources(self, source_info=None, order_by=None) -> Dict[str, Any]:
+
+        where_clause = ''
+        parameters = {}
+
+        order_by_clause = f'result.metadata.{order_by},' if order_by else ''
+        order_by_clause = f'ORDER BY {order_by_clause} result.versioning.valid_from ASC'
+
+        if source_info:
+
+            if isinstance(source_info, str):
+                source_info = [source_info]
+
+            if isinstance(source_info, list) and isinstance(source_info[0], str):
+                where_clause = f'WHERE {self.graph_store.node_id("source.sourceId")} in $sourceIds'
+                parameters['sourceIds'] = source_info
+            else:
+                source_info = to_metadata_filter(source_info)
+                where_clause =  filter_config_to_opencypher_filters(source_info)
+                where_clause = f'WHERE {where_clause}' if where_clause else ''
+
+        cypher = f'''// get source info from source ids
+        MATCH (source:`__Source__`)
+        {where_clause}
+        RETURN {{ 
+            sourceId: {self.graph_store.node_id("source.sourceId")}, 
+            metadata: properties(source), 
+            versioning: {{
+                valid_from: coalesce(source.{VALID_FROM}, {TIMESTAMP_LOWER_BOUND}), 
+                valid_to: coalesce(source.{VALID_TO}, {TIMESTAMP_LOWER_BOUND}),
+                extract_timestamp: coalesce(source.{EXTRACT_TIMESTAMP}, {TIMESTAMP_LOWER_BOUND}),
+                build_timestamp: coalesce(source.{BUILD_TIMESTAMP}, {TIMESTAMP_LOWER_BOUND}),
+                id_fields: split(coalesce(s.{VERSION_INDEPENDENT_ID_FIELDS}, ""), ";")
+            }}  
+        }} AS result {order_by_clause}
+        '''
+
+        results = self.graph_store.execute_query(cypher, parameters)
+
+        def reformat(source):
+            
+            for key in VERSIONING_METADATA_KEYS:
+                if key in source['metadata']:
+                    del source['metadata'][key]
+
+            return source
+
+        return [reformat(result['result']) for result in results]

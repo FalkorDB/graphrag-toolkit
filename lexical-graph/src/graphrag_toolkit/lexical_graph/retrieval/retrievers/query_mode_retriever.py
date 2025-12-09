@@ -27,7 +27,7 @@ class QueryModeRetriever(BaseRetriever):
     def _retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
 
         if self.args.enable_multipart_queries:
-            query_mode_provider = QueryModeProvider()
+            query_mode_provider = QueryModeProvider(self.args)
             query_mode = query_mode_provider.get_query_mode(query_bundle.query_str)
         else:
             query_mode = QueryMode.SIMPLE

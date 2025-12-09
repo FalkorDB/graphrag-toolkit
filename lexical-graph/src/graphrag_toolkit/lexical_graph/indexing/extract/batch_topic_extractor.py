@@ -14,13 +14,13 @@ from datetime import datetime
 from graphrag_toolkit.lexical_graph import GraphRAGConfig, BatchJobError
 from graphrag_toolkit.lexical_graph.utils import LLMCache, LLMCacheType
 from graphrag_toolkit.lexical_graph.indexing.utils.topic_utils import parse_extracted_topics, format_list, format_text
-from graphrag_toolkit.lexical_graph.indexing.utils.batch_inference_utils import create_inference_inputs, create_inference_inputs_for_messages, create_and_run_batch_job, download_output_files, process_batch_output, split_nodes
+from graphrag_toolkit.lexical_graph.indexing.utils.batch_inference_utils import create_and_run_batch_job, download_output_files, process_batch_output, split_nodes, get_request_body
 from graphrag_toolkit.lexical_graph.indexing.utils.batch_inference_utils import get_file_size_mb, get_file_sizes_mb
-from graphrag_toolkit.lexical_graph.indexing.constants import TOPICS_KEY, DEFAULT_ENTITY_CLASSIFICATIONS
+from graphrag_toolkit.lexical_graph.indexing.constants import TOPICS_KEY
 from graphrag_toolkit.lexical_graph.indexing.prompts import EXTRACT_TOPICS_PROMPT
+from graphrag_toolkit.lexical_graph.indexing.extract.preferred_values import PreferredValuesProvider, default_preferred_values
 from graphrag_toolkit.lexical_graph.indexing.extract.topic_extractor import TopicExtractor
 from graphrag_toolkit.lexical_graph.indexing.extract.batch_config import BatchConfig
-from graphrag_toolkit.lexical_graph.indexing.extract.scoped_value_provider import ScopedValueProvider, FixedScopedValueProvider, DEFAULT_SCOPE
 from graphrag_toolkit.lexical_graph.indexing.utils.batch_inference_utils import BEDROCK_MIN_BATCH_SIZE
 
 from llama_index.core.extractors.interface import BaseExtractor
@@ -61,8 +61,8 @@ class BatchTopicExtractor(BaseExtractor):
     prompt_template:str = Field(description='Prompt template')
     source_metadata_field:Optional[str] = Field(description='Metadata field from which to extract propositions')
     batch_inference_dir:str = Field(description='Directory for batch inputs and outputs')
-    entity_classification_provider:ScopedValueProvider = Field( description='Entity classification provider')
-    topic_provider:ScopedValueProvider = Field(description='Topic provider')
+    entity_classification_provider:PreferredValuesProvider = Field( description='Entity classification provider')
+    topic_provider:PreferredValuesProvider = Field(description='Topic provider')
     
 
     @classmethod
@@ -83,8 +83,8 @@ class BatchTopicExtractor(BaseExtractor):
                  prompt_template:str = None,
                  source_metadata_field:Optional[str] = None,
                  batch_inference_dir:str = None,
-                 entity_classification_provider:Optional[ScopedValueProvider]=None,
-                 topic_provider:Optional[ScopedValueProvider]=None):
+                 entity_classification_provider:Optional[PreferredValuesProvider]=None,
+                 topic_provider:Optional[PreferredValuesProvider]=None):
         """
         Initializes an instance of the class with configuration details for batch processing,
         language model, prompt templates, metadata fields, directory for batch inference,
@@ -111,8 +111,8 @@ class BatchTopicExtractor(BaseExtractor):
             prompt_template=prompt_template or EXTRACT_TOPICS_PROMPT,
             source_metadata_field=source_metadata_field,
             batch_inference_dir=batch_inference_dir or os.path.join('output', 'batch-topics'),
-            entity_classification_provider=entity_classification_provider or FixedScopedValueProvider(scoped_values={DEFAULT_SCOPE: DEFAULT_ENTITY_CLASSIFICATIONS}),
-            topic_provider=topic_provider or FixedScopedValueProvider(scoped_values={DEFAULT_SCOPE: []})
+            entity_classification_provider=entity_classification_provider or default_preferred_values([]),
+            topic_provider=topic_provider or default_preferred_values([])
         )
 
         logger.debug(f'Prompt template: {self.prompt_template}')
@@ -190,46 +190,6 @@ class BatchTopicExtractor(BaseExtractor):
 
             # 1 - Create Record Files (.jsonl)
 
-            entity_classification_map = {}
-            topic_map = {}
-
-            def get_classifications(node):
-                scope = self.entity_classification_provider.scope_func(node)
-                if scope not in entity_classification_map:
-                    (_, current_entity_classifications) = self.entity_classification_provider.get_current_values(node)
-                    entity_classification_map[scope] = current_entity_classifications
-                return entity_classification_map[scope]
-            
-            def get_topics(node):
-                scope = self.topic_provider.scope_func(node)
-                if scope not in topic_map:
-                    # It's unlikely there'll be any topics for this node, but just in case...
-                    (_, current_topics) = self.topic_provider.get_current_values(node)
-                    topic_map[scope] = current_topics
-                return topic_map[scope]
-
-            messages_batch = []
-            for node in node_batch:
-                classifications = get_classifications(node)
-                topics = get_topics(node)
-                text = format_text(
-                    self._get_metadata_or_default(node.metadata, self.source_metadata_field, node.text) 
-                    if self.source_metadata_field 
-                    else node.text
-                )
-                messages = self.llm.llm._get_messages(
-                    PromptTemplate(self.prompt_template), 
-                    text=text,
-                    preferred_entity_classifications=format_list(classifications),
-                    preferred_topics=format_list(topics)
-                )
-                messages_batch.append(messages)
-
-            json_inputs = create_inference_inputs_for_messages(
-                self.llm.llm, 
-                node_batch, 
-                messages_batch
-            )
 
             root_dir = os.path.join(self.batch_inference_dir, timestamp, batch_suffix)
             input_dir = os.path.join(root_dir, 'inputs')
@@ -239,14 +199,39 @@ class BatchTopicExtractor(BaseExtractor):
 
             input_filepath = os.path.join(input_dir, input_filename)
 
-            logger.debug(f'[Topic batch inputs] Writing {len(json_inputs)} records to {input_filename}')
+            logger.debug(f'[Topic batch inputs] Writing records to {input_filename}')
+
+            llm = self.llm.llm
+
+            inference_parameters = llm._get_all_kwargs() 
+            record_count = 0
 
             with open(input_filepath, 'w') as file:
-                for item in json_inputs:
-                    json.dump(item, file)
+
+                for node in node_batch:
+                    classifications = self.entity_classification_provider(node)
+                    topics = self.topic_provider(node)
+                    text = format_text(
+                        self._get_metadata_or_default(node.metadata, self.source_metadata_field, node.text) 
+                        if self.source_metadata_field 
+                        else node.text
+                    )
+                    messages = llm._get_messages(
+                        PromptTemplate(self.prompt_template), 
+                        text=text,
+                        preferred_entity_classifications=format_list(classifications),
+                        preferred_topics=format_list(topics)
+                    )
+                    json_structure = {
+                        'recordId': node.node_id,
+                        'modelInput': get_request_body(llm, messages, inference_parameters)
+                    }
+                    json.dump(json_structure, file)
                     file.write('\n')
 
-            logger.debug(f'[Topic batch inputs] Batch input file ready [file: {input_filepath} ({get_file_size_mb(input_filepath)} MB)]')
+                    record_count += 1
+
+            logger.debug(f'[Topic batch inputs] Batch input file ready [num_records: {record_count}, file: {input_filepath} ({get_file_size_mb(input_filepath)} MB)]')
 
             # 2 - Upload records to s3
             if self.batch_config.key_prefix:

@@ -16,6 +16,7 @@ from llama_index.core.indices.utils import embed_nodes
 from llama_index.core.vector_stores.types import MetadataFilters
 
 from graphrag_toolkit.lexical_graph.metadata import FilterConfig, is_datetime_key, format_datetime
+from graphrag_toolkit.lexical_graph.versioning import  VALID_FROM, VALID_TO, TIMESTAMP_LOWER_BOUND, TIMESTAMP_UPPER_BOUND
 from graphrag_toolkit.lexical_graph.config import GraphRAGConfig, EmbeddingType
 from graphrag_toolkit.lexical_graph.storage.vector import VectorIndex, to_embedded_query
 from graphrag_toolkit.lexical_graph.storage.constants import INDEX_KEY
@@ -233,25 +234,49 @@ def index_exists(endpoint, index_name, dimensions, writeable) -> bool:
     client = create_os_client(endpoint, pool_maxsize=1)
 
     embedding_field = 'embedding'
-    method = {
-        "name": "hnsw",
-        "space_type": "l2",
-        "engine": "nmslib",
-        "parameters": {"ef_construction": 256, "m": 48},
-    }
 
-    idx_conf = {
-        "settings": {"index": {"knn": True, "knn.algo_param.ef_search": 100}},
-        "mappings": {
-            "properties": {
-                embedding_field: {
-                    "type": "knn_vector",
-                    "dimension": dimensions,
-                    "method": method,
-                },
+    if GraphRAGConfig.opensearch_engine.lower() == 'faiss':
+
+        method = {
+            "name": "hnsw",
+            "space_type": "l2",
+            "engine": "faiss"
+        }
+
+        idx_conf = {
+            "settings": {"index": {"knn": True}},
+            "mappings": {
+                "properties": {
+                    embedding_field: {
+                        "type": "knn_vector",
+                        "dimension": dimensions,
+                        "method": method,
+                    },
+                }
             }
         }
-    }
+
+    else:
+
+        method = {
+            "name": "hnsw",
+            "space_type": "l2",
+            "engine": "nmslib",
+            "parameters": {"ef_construction": 256, "m": 48},
+        }
+
+        idx_conf = {
+            "settings": {"index": {"knn": True, "knn.algo_param.ef_search": 100}},
+            "mappings": {
+                "properties": {
+                    embedding_field: {
+                        "type": "knn_vector",
+                        "dimension": dimensions,
+                        "method": method,
+                    },
+                }
+            }
+        }
 
     index_exists = False
 
@@ -647,17 +672,12 @@ class OpenSearchIndex(VectorIndex):
             nodes, self.embed_model
         )
 
-        docs = []
-
         for node in nodes:
 
-            doc:BaseNode = node.copy()
-            doc.embedding = id_to_embed_map[node.node_id]
+            node.embedding = id_to_embed_map[node.node_id]
 
-            docs.append(doc)
-
-        if docs:
-            errors = self.client.index_results(docs)
+        if nodes:
+            errors = self.client.index_results(nodes)
             if errors:
                 logger.error(f'Errors while adding embeddings: {errors}')
         
@@ -687,7 +707,12 @@ class OpenSearchIndex(VectorIndex):
         """
         for f in filters.filters:
             if isinstance(f, MetadataFilter):
-                f.key = f'source.metadata.{f.key}'
+                if f.key == VALID_FROM:
+                    f.key = 'source.versioning.valid_from'
+                elif f.key == VALID_TO:
+                    f.key = 'source.versioning.valid_to'
+                else:
+                    f.key = f'source.metadata.{f.key}'
                 if is_datetime_key(f.key):
                     f.value = format_datetime(f.value)
             elif isinstance(f, MetadataFilters):
@@ -919,6 +944,39 @@ class OpenSearchIndex(VectorIndex):
         
         return filtered_nodes
     
+    def update_versioning(self, versioning_timestamp:int, ids:List[str]=[]) -> List[str]:
+
+        allow_refresh = True
+        doc_id_map = self._get_existing_doc_ids_for_ids(ids)
+
+        start = time.time()
+
+        while (len(doc_id_map.keys()) < len(ids)) and allow_refresh:
+            logger.debug('Unable to find documents for all ids in index, waiting 10 seconds')
+            time.sleep(10)
+            doc_id_map = self._get_existing_doc_ids_for_ids(ids)
+            if int(time.time() - start) > 70:
+                allow_refresh = False
+
+        if len(doc_id_map.keys()) < len(ids):
+            logger.warning(f'Unable to find documents for all ids in index after 70 seconds: [ids: {ids}, indexed_ids: {doc_id_map.keys()}]')
+
+        requests = []
+        update_request = '{ "doc": {"metadata" : {"source" : {"versioning": {"valid_to": ' + str(versioning_timestamp) + '}}}}}'
+
+        for item in doc_id_map.values():
+            for doc_id in item:
+                requests.append(f'{{ "update" : {{"_id" : "{doc_id}", "_index" : "{self.underlying_index_name()}" }} }}')
+                requests.append(update_request)
+
+        if requests:
+            failed_doc_ids = self._try_bulk_update('\n'.join(requests))
+            return self._unmap_doc_ids(failed_doc_ids, doc_id_map)        
+        else:
+            logger.warning(f'Versioning bulk update request is empty')
+            return []
+
+    
     def _get_existing_doc_ids_for_ids(self, ids:List[str]=[]):
    
         query = {
@@ -942,3 +1000,69 @@ class OpenSearchIndex(VectorIndex):
             
         
         return doc_id_map
+    
+    def enable_for_versioning(self, ids:List[str]=[]) -> List[str]:
+
+        allow_refresh = True
+        doc_id_map = self._get_existing_doc_ids_for_ids(ids)
+
+        start = time.time()
+
+        while (len(doc_id_map.keys()) < len(ids)) and allow_refresh:
+            logger.debug('Unable to find documents for all ids in index, waiting 10 seconds')
+            time.sleep(10)
+            doc_id_map = self._get_existing_doc_ids_for_ids(ids)
+            if int(time.time() - start) > 70:
+                allow_refresh = False
+
+        if len(doc_id_map.keys()) < len(ids):
+            logger.warning(f'Unable to find documents for all ids in index after 70 seconds: [ids: {ids}, indexed_ids: {doc_id_map.keys()}]')
+
+        requests = []
+        update_request = '{ "doc": {"metadata" : {"source" : {"versioning": {"valid_from": ' + str(TIMESTAMP_LOWER_BOUND) + ', "valid_to": ' + str(TIMESTAMP_UPPER_BOUND) + '}}}}}'
+
+        for item in doc_id_map.values():
+            for doc_id in item:
+                requests.append(f'{{ "update" : {{"_id" : "{doc_id}", "_index" : "{self.underlying_index_name()}" }} }}')
+                requests.append(update_request)
+
+        if requests:
+            failed_doc_ids = self._try_bulk_update('\n'.join(requests))
+            return self._unmap_doc_ids(failed_doc_ids, doc_id_map)      
+        else:
+            logger.warning(f'Versioning bulk update request is empty')
+            return []
+        
+    def _unmap_doc_ids(self, doc_ids:List[str], doc_id_map:Dict[str, List[str]]) -> List[str]:
+        
+        reverse_doc_id_map = {}
+
+        for id, doc_id_list in doc_id_map.items():
+            reverse_doc_id_map.update({doc_id:id for doc_id in doc_id_list})
+
+        return [reverse_doc_id_map[doc_id] for doc_id in doc_ids]
+
+    def _try_bulk_update(self, body:str):
+
+        def is_transient(item:Dict):
+            return item.get('update', {}).get('status', 0) in [429, 503]
+
+        for attempt_num in range(1, 6):
+
+            response = self.client._os_client.bulk(body=body)
+
+            if response['errors']:
+                is_retriable = all([is_transient(item) for item in response.get('items', [])])
+                if is_retriable:
+                    logger.warning(f'Transient error during bulk update, retrying after {attempt_num} seconds')
+                    time.sleep(attempt_num)
+            else:
+                return []
+            
+        logger.error(f'Error during bulk update: {str(response)}')
+
+        return [
+            item['update']['_id'] 
+            for item in response['items']
+            if item.get('error', None)
+        ]

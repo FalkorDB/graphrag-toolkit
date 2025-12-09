@@ -11,7 +11,7 @@ import shutil
 import copy
 import base64
 from pathlib import Path
-from typing import Callable, Dict, Any
+from typing import Callable, Dict, Any, Optional
 from os.path import join
 from urllib.parse import urlparse
 
@@ -190,6 +190,7 @@ class BedrockKnowledgeBaseExport():
                  include_embeddings:bool=True,
                  include_source_doc:bool=False,
                  tenant_id:str=None,
+                 include_classification_in_entity_id:Optional[bool]=None,
                  **kwargs):
         """
         Initializes the instance with configuration for connecting to an S3 bucket and
@@ -215,13 +216,16 @@ class BedrockKnowledgeBaseExport():
             tenant_id (str): Identifier for the tenant. Defaults to None.
             **kwargs: Additional keyword arguments for customization.
         """
+        include_classification_in_entity_id = include_classification_in_entity_id or GraphRAGConfig.include_classification_in_entity_id
+        id_generator=IdGenerator(tenant_id=tenant_id, include_classification_in_entity_id=include_classification_in_entity_id)
+
         self.bucket_name=bucket_name
         self.key_prefix=key_prefix
         self.region=region
         self.limit=limit
         self.output_dir = output_dir
         self.s3_client = GraphRAGConfig.s3
-        self.id_rewriter = IdRewriter(id_generator=IdGenerator(tenant_id=tenant_id))
+        self.id_rewriter = IdRewriter(id_generator=id_generator)
         self.metadata_fn=metadata_fn
         self.include_embeddings = include_embeddings
         self.include_source_doc = include_source_doc

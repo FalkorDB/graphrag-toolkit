@@ -15,3 +15,4 @@ LEXICAL_GRAPH_LABELS = [
     '__SYS_SV__StatementTopic__',
     '__SYS_Class__'
 ]
+

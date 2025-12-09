@@ -18,7 +18,7 @@ You can use FalkorDB as a graph store.
 The FalkorDB graph store is contained in a separate contributor package. To install it:
 
 ```
-!pip install https://github.com/awslabs/graphrag-toolkit/archive/refs/tags/v3.12.0.zip#subdirectory=lexical-graph-contrib/falkordb
+!pip install https://github.com/awslabs/graphrag-toolkit/archive/refs/tags/v3.14.0.zip#subdirectory=lexical-graph-contrib/falkordb
 ```
 
 ### Registering FalkorDB as a graph store
@@ -37,7 +37,7 @@ GraphStoreFactory.register(FalkorDBGraphStoreFactory)
 
 You can use the `GraphStoreFactory.for_graph_store()` static factory method to create an instance of a FalkorDB graph store.
 
-The FalkorDB graph store currently supports the [SemanticGuidedRetriever](./querying.md#semanticguidedretriever). It does not support the [TraversalBasedRetriever](./querying.md#traversalbasedretriever).
+The FalkorDB graph store currently supports [semantic-guided search](./semantic-guided-search.md). It does not support [traversal-based search](./traversal-based-search.md).
 
 To create a [FalkorDB Cloud](https://app.falkordb.cloud/) graph store, supply a connection string that begins `falkordb://`, followed by the FalkorDB endpoint:
 
